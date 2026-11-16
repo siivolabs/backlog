@@ -1,419 +1,599 @@
 'use strict';
 
-const http = require('node:http');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
-const { URL } = require('node:url');
 const { DatabaseSync } = require('node:sqlite');
 
-const VERSION = '0.5.0';
-const DEFAULT_PORT = Number(process.env.PORT || 3000);
-const DEFAULT_DB_PATH = process.env.DB_PATH || '/data/backlog.sqlite';
+const VERSION = '0.6.0';
+const STATUS_VALUES = ['pending', 'syncing', 'synced', 'temporary_error', 'unavailable'];
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const MAX_BODY_BYTES = 12 * 1024 * 1024;
-const MAX_ENRICH_BATCH = 10;
-const STEAM_TIMEOUT_MS = 12_000;
-const APPID_MAX = 2_147_483_647;
 
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon'
-};
-
-function toInteger(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : fallback;
-}
-
-function validateAppid(value) {
-  const text = String(value ?? '');
-  if (!/^\d{1,10}$/.test(text)) return null;
-  const appid = Number(text);
-  return Number.isSafeInteger(appid) && appid > 0 && appid <= APPID_MAX ? appid : null;
-}
-
-function normalizeGame(game) {
-  const appid = validateAppid(game?.appid ?? game?.app_id);
-  const name = typeof game?.name === 'string' ? game.name.trim() : '';
-  if (!appid || !name) return null;
-
-  return {
-    appid,
-    name: name.slice(0, 500),
-    playtime_forever: toInteger(game.playtime_forever),
-    playtime_windows_forever: toInteger(game.playtime_windows_forever),
-    playtime_mac_forever: toInteger(game.playtime_mac_forever),
-    playtime_linux_forever: toInteger(game.playtime_linux_forever),
-    playtime_deck_forever: toInteger(game.playtime_deck_forever),
-    rtime_last_played: toInteger(game.rtime_last_played),
-    img_icon_url: typeof game.img_icon_url === 'string' ? game.img_icon_url.slice(0, 200) : '',
-    raw_json: JSON.stringify(game)
-  };
-}
-
-function ensureDatabaseDirectory(dbPath) {
-  if (dbPath === ':memory:') return;
-  fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
-}
-
-function openDatabase(dbPath) {
-  ensureDatabaseDirectory(dbPath);
-  const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-  if (dbPath !== ':memory:') db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS games (
-      appid INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      playtime_forever INTEGER NOT NULL DEFAULT 0,
-      playtime_windows_forever INTEGER NOT NULL DEFAULT 0,
-      playtime_mac_forever INTEGER NOT NULL DEFAULT 0,
-      playtime_linux_forever INTEGER NOT NULL DEFAULT 0,
-      playtime_deck_forever INTEGER NOT NULL DEFAULT 0,
-      rtime_last_played INTEGER NOT NULL DEFAULT 0,
-      img_icon_url TEXT NOT NULL DEFAULT '',
-      raw_json TEXT NOT NULL DEFAULT '{}',
-      imported_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS metadata (
-      appid INTEGER PRIMARY KEY,
-      steam_name TEXT NOT NULL DEFAULT '',
-      genres_json TEXT NOT NULL DEFAULT '[]',
-      fetched_at TEXT NOT NULL,
-      FOREIGN KEY (appid) REFERENCES games(appid) ON DELETE CASCADE
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS library_state (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      source_name TEXT NOT NULL DEFAULT '',
-      imported_at TEXT NOT NULL,
-      game_count INTEGER NOT NULL DEFAULT 0
-    ) STRICT;
-
-    CREATE INDEX IF NOT EXISTS idx_games_name ON games(name COLLATE NOCASE);
-  `);
-  return db;
-}
-
-function createRepository(db) {
-  const listGames = db.prepare(`
-    SELECT g.appid, g.name, g.playtime_forever, g.playtime_windows_forever,
-           g.playtime_mac_forever, g.playtime_linux_forever, g.playtime_deck_forever,
-           g.rtime_last_played, g.img_icon_url, m.steam_name, m.genres_json, m.fetched_at
-      FROM games g
-      LEFT JOIN metadata m ON m.appid = g.appid
-     ORDER BY g.name COLLATE NOCASE, g.appid
-  `);
-  const getMetadata = db.prepare('SELECT steam_name, genres_json, fetched_at FROM metadata WHERE appid = ?');
-  const upsertGame = db.prepare(`
-    INSERT INTO games (
-      appid, name, playtime_forever, playtime_windows_forever, playtime_mac_forever,
-      playtime_linux_forever, playtime_deck_forever, rtime_last_played, img_icon_url,
-      raw_json, imported_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(appid) DO UPDATE SET
-      name = excluded.name,
-      playtime_forever = excluded.playtime_forever,
-      playtime_windows_forever = excluded.playtime_windows_forever,
-      playtime_mac_forever = excluded.playtime_mac_forever,
-      playtime_linux_forever = excluded.playtime_linux_forever,
-      playtime_deck_forever = excluded.playtime_deck_forever,
-      rtime_last_played = excluded.rtime_last_played,
-      img_icon_url = excluded.img_icon_url,
-      raw_json = excluded.raw_json,
-      imported_at = excluded.imported_at
-  `);
-  const upsertMetadata = db.prepare(`
-    INSERT INTO metadata (appid, steam_name, genres_json, fetched_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(appid) DO UPDATE SET
-      steam_name = excluded.steam_name,
-      genres_json = excluded.genres_json,
-      fetched_at = excluded.fetched_at
-  `);
-
-  function rowToGame(row) {
-    let genres = [];
-    try { genres = JSON.parse(row.genres_json || '[]'); } catch { genres = []; }
-    return { ...row, genres, enriched: Boolean(row.fetched_at) };
+class HttpError extends Error {
+  constructor(status, message, code = 'request_failed') {
+    super(message);
+    this.status = status;
+    this.code = code;
   }
-
-  return {
-    getLibrary() {
-      const state = db.prepare('SELECT source_name, imported_at, game_count FROM library_state WHERE id = 1').get() || null;
-      return { state, games: listGames.all().map(rowToGame) };
-    },
-
-    importGames(inputGames, sourceName = '') {
-      const unique = new Map();
-      for (const candidate of inputGames) {
-        const game = normalizeGame(candidate);
-        if (game) unique.set(game.appid, game);
-      }
-      const games = [...unique.values()];
-      if (!games.length && inputGames.length) {
-        const error = new Error('Aucun jeu valide dans le fichier importé.');
-        error.statusCode = 400;
-        throw error;
-      }
-      const now = new Date().toISOString();
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        db.exec('CREATE TEMP TABLE current_import (appid INTEGER PRIMARY KEY) STRICT;');
-        const remember = db.prepare('INSERT INTO current_import (appid) VALUES (?)');
-        for (const game of games) {
-          remember.run(game.appid);
-          upsertGame.run(
-            game.appid, game.name, game.playtime_forever, game.playtime_windows_forever,
-            game.playtime_mac_forever, game.playtime_linux_forever, game.playtime_deck_forever,
-            game.rtime_last_played, game.img_icon_url, game.raw_json, now
-          );
-        }
-        db.exec('DELETE FROM games WHERE appid NOT IN (SELECT appid FROM current_import); DROP TABLE current_import;');
-        db.prepare(`
-          INSERT INTO library_state (id, source_name, imported_at, game_count)
-          VALUES (1, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET source_name = excluded.source_name,
-            imported_at = excluded.imported_at, game_count = excluded.game_count
-        `).run(String(sourceName).slice(0, 255), now, games.length);
-        db.exec('COMMIT');
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-      }
-      return { imported: games.length, rejected: inputGames.length - games.length, importedAt: now };
-    },
-
-    clearLibrary() {
-      db.exec('BEGIN IMMEDIATE; DELETE FROM metadata; DELETE FROM games; DELETE FROM library_state; COMMIT;');
-    },
-
-    getMetadata(appid) {
-      const row = getMetadata.get(appid);
-      if (!row) return null;
-      let genres = [];
-      try { genres = JSON.parse(row.genres_json || '[]'); } catch { genres = []; }
-      return { appid, name: row.steam_name, genres, fetchedAt: row.fetched_at, cached: true };
-    },
-
-    saveMetadata(appid, metadata) {
-      const fetchedAt = new Date().toISOString();
-      upsertMetadata.run(appid, metadata.name || '', JSON.stringify(metadata.genres || []), fetchedAt);
-      return { appid, name: metadata.name || '', genres: metadata.genres || [], fetchedAt, cached: false };
-    },
-
-    hasGame(appid) {
-      return Boolean(db.prepare('SELECT 1 AS found FROM games WHERE appid = ?').get(appid));
-    }
-  };
 }
 
-async function readJsonBody(request) {
-  let size = 0;
-  const chunks = [];
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
-      const error = new Error('Le fichier dépasse la taille maximale autorisée.');
-      error.statusCode = 413;
-      throw error;
-    }
-    chunks.push(chunk);
-  }
-  if (!chunks.length) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch {
-    const error = new Error('Le corps de la requête n’est pas un JSON valide.');
-    error.statusCode = 400;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const nowIso = () => new Date().toISOString();
+
+function safeJsonParse(value, fallback = []) {
+  try { return JSON.parse(value || ''); } catch { return fallback; }
+}
+
+function booleanFromEnv(value, fallback = false) {
+  if (value == null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+}
+
+function transaction(db, operation) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = operation();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch { /* no-op */ }
     throw error;
   }
 }
 
-function sendJson(response, statusCode, payload, extraHeaders = {}) {
-  const body = Buffer.from(JSON.stringify(payload));
-  response.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': body.length,
-    'Cache-Control': 'no-store',
-    ...extraHeaders
-  });
-  response.end(body);
+function initializeDatabase(db) {
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = 5000;
+    CREATE TABLE IF NOT EXISTS games (
+      appid INTEGER PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      playtime_forever INTEGER NOT NULL DEFAULT 0,
+      playtime_windows_forever INTEGER NOT NULL DEFAULT 0,
+      playtime_mac_forever INTEGER NOT NULL DEFAULT 0,
+      playtime_linux_forever INTEGER NOT NULL DEFAULT 0,
+      rtime_last_played INTEGER NOT NULL DEFAULT 0,
+      img_icon_url TEXT NOT NULL DEFAULT '',
+      genres TEXT NOT NULL DEFAULT '[]',
+      metadata_status TEXT NOT NULL DEFAULT 'pending',
+      metadata_error TEXT,
+      metadata_attempts INTEGER NOT NULL DEFAULT 0,
+      metadata_updated_at TEXT,
+      next_retry_at TEXT,
+      source_steamid TEXT,
+      last_seen_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS sync_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      steamid TEXT NOT NULL,
+      profile_name TEXT,
+      game_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      message TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+  `);
+
+  // Migration non destructive depuis V0.5.
+  const existing = new Set(db.prepare('PRAGMA table_info(games)').all().map((row) => row.name));
+  const additions = {
+    playtime_forever: 'INTEGER NOT NULL DEFAULT 0',
+    playtime_windows_forever: 'INTEGER NOT NULL DEFAULT 0',
+    playtime_mac_forever: 'INTEGER NOT NULL DEFAULT 0',
+    playtime_linux_forever: 'INTEGER NOT NULL DEFAULT 0',
+    rtime_last_played: 'INTEGER NOT NULL DEFAULT 0',
+    img_icon_url: "TEXT NOT NULL DEFAULT ''",
+    genres: "TEXT NOT NULL DEFAULT '[]'",
+    metadata_status: "TEXT NOT NULL DEFAULT 'pending'",
+    metadata_error: 'TEXT',
+    metadata_attempts: 'INTEGER NOT NULL DEFAULT 0',
+    metadata_updated_at: 'TEXT',
+    next_retry_at: 'TEXT',
+    source_steamid: 'TEXT',
+    last_seen_at: 'TEXT',
+    created_at: 'TEXT',
+    updated_at: 'TEXT'
+  };
+  for (const [column, definition] of Object.entries(additions)) {
+    if (!existing.has(column)) db.exec(`ALTER TABLE games ADD COLUMN ${column} ${definition}`);
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_games_metadata_status ON games(metadata_status, next_retry_at);
+    CREATE INDEX IF NOT EXISTS idx_games_name ON games(name COLLATE NOCASE);
+    UPDATE games SET metadata_status = 'pending' WHERE metadata_status = 'syncing';
+    UPDATE games SET genres = '[]' WHERE genres IS NULL OR genres = '';
+  `);
 }
 
-function securityHeaders(response) {
-  response.setHeader('X-Content-Type-Options', 'nosniff');
-  response.setHeader('X-Frame-Options', 'DENY');
-  response.setHeader('Referrer-Policy', 'no-referrer');
-  response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  response.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
-}
-
-function createRateLimiter({ windowMs = 60_000, max = 30 } = {}) {
-  const buckets = new Map();
-  return function allow(key) {
-    const now = Date.now();
-    const bucket = buckets.get(key);
-    if (!bucket || now - bucket.startedAt >= windowMs) {
-      buckets.set(key, { startedAt: now, count: 1 });
-      return true;
-    }
-    bucket.count += 1;
-    return bucket.count <= max;
+function createSettingsStore(db) {
+  const getStatement = db.prepare('SELECT value FROM settings WHERE key = ?');
+  const setStatement = db.prepare(`
+    INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `);
+  const deleteStatement = db.prepare('DELETE FROM settings WHERE key = ?');
+  return {
+    get(key, fallback = null) { return getStatement.get(key)?.value ?? fallback; },
+    set(key, value) { setStatement.run(key, String(value), nowIso()); },
+    remove(key) { deleteStatement.run(key); }
   };
 }
 
-async function fetchSteamMetadata(appid, fetchImpl = globalThis.fetch) {
+function constantTimeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function normalizeProfileInput(input) {
+  const value = String(input || '').trim();
+  if (/^\d{17}$/.test(value)) return { type: 'steamid', value };
+  let parsed = null;
+  try { parsed = new URL(value); } catch { /* not a URL */ }
+  if (parsed && /(^|\.)steamcommunity\.com$/i.test(parsed.hostname)) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts[0] === 'profiles' && /^\d{17}$/.test(parts[1] || '')) return { type: 'steamid', value: parts[1] };
+    if (parts[0] === 'id' && /^[A-Za-z0-9_-]{2,64}$/.test(parts[1] || '')) return { type: 'vanity', value: parts[1] };
+  }
+  if (/^[A-Za-z0-9_-]{2,64}$/.test(value)) return { type: 'vanity', value };
+  throw new HttpError(400, 'Saisis un SteamID64, un nom personnalisé ou une URL de profil Steam valide.', 'invalid_profile');
+}
+
+async function fetchJson(fetchImpl, url, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), STEAM_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 15000);
   try {
-    const endpoint = `https://store.steampowered.com/api/appdetails?appids=${appid}&l=french&cc=fr`;
-    const steamResponse = await fetchImpl(endpoint, {
-      signal: controller.signal,
-      headers: { 'User-Agent': `Backlog/${VERSION}` }
+    const response = await fetchImpl(url, {
+      headers: { 'user-agent': `SiivoLabs-Backlog/${VERSION}`, accept: 'application/json' },
+      signal: controller.signal
     });
-    if (!steamResponse.ok) throw new Error(`Steam a répondu avec le statut ${steamResponse.status}.`);
-    const payload = await steamResponse.json();
-    const item = payload?.[String(appid)];
-    if (!item?.success || !item.data) throw new Error('Steam ne fournit aucune fiche pour cet AppID.');
-    return {
-      name: typeof item.data.name === 'string' ? item.data.name : '',
-      genres: Array.isArray(item.data.genres)
-        ? [...new Set(item.data.genres.map((genre) => genre?.description).filter(Boolean))]
-        : []
-    };
+    const text = await response.text();
+    let data = null;
+    if (text) {
+      try { data = JSON.parse(text); }
+      catch { throw new HttpError(502, 'Steam a renvoyé une réponse illisible.', 'invalid_upstream_response'); }
+    }
+    if (!response.ok) {
+      const error = new HttpError(response.status === 429 ? 429 : 502, `Steam a répondu HTTP ${response.status}.`, 'upstream_error');
+      error.upstreamStatus = response.status;
+      error.retryAfter = Number(response.headers.get('retry-after')) || null;
+      throw error;
+    }
+    return data;
   } catch (error) {
-    if (error.name === 'AbortError') throw new Error('Steam n’a pas répondu dans le délai prévu.');
+    if (error.name === 'AbortError') throw new HttpError(504, "Steam n'a pas répondu à temps.", 'upstream_timeout');
     throw error;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function serveStatic(requestPath, response) {
-  const normalized = requestPath === '/' ? '/index.html' : requestPath;
-  const decoded = decodeURIComponent(normalized);
-  const filePath = path.resolve(PUBLIC_DIR, `.${decoded}`);
-  if (!filePath.startsWith(`${path.resolve(PUBLIC_DIR)}${path.sep}`)) return false;
-  let stats;
-  try { stats = fs.statSync(filePath); } catch { return false; }
-  if (!stats.isFile()) return false;
-  const content = fs.readFileSync(filePath);
-  response.writeHead(200, {
-    'Content-Type': MIME_TYPES[path.extname(filePath)] || 'application/octet-stream',
-    'Content-Length': content.length,
-    'Cache-Control': path.basename(filePath) === 'index.html' ? 'no-cache' : 'public, max-age=3600'
+function securityHeaders() {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Content-Security-Policy': "default-src 'self'; img-src 'self' https://cdn.cloudflare.steamstatic.com https://shared.cloudflare.steamstatic.com data:; connect-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+  };
+}
+
+function sendJson(res, status, payload, extraHeaders = {}) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    ...securityHeaders(),
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-store',
+    ...extraHeaders
   });
-  response.end(content);
+  res.end(body);
+}
+
+async function readJson(req, limit = 65536) {
+  const contentType = String(req.headers['content-type'] || '');
+  if (!contentType.includes('application/json')) throw new HttpError(415, 'Le corps doit être au format JSON.', 'invalid_content_type');
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new HttpError(413, 'Corps de requête trop volumineux.', 'payload_too_large');
+    chunks.push(chunk);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+  catch { throw new HttpError(400, 'JSON invalide.', 'invalid_json'); }
+}
+
+function staticResponse(req, res, pathname, production) {
+  if (!['GET', 'HEAD'].includes(req.method)) return false;
+  const requested = pathname === '/' ? '/index.html' : pathname;
+  let decoded;
+  try { decoded = decodeURIComponent(requested); } catch { return false; }
+  const normalized = path.posix.normalize(decoded).replace(/^\/+/, '');
+  const filePath = path.join(PUBLIC_DIR, normalized);
+  if (!filePath.startsWith(`${PUBLIC_DIR}${path.sep}`) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return false;
+  const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
+  const body = fs.readFileSync(filePath);
+  res.writeHead(200, {
+    ...securityHeaders(),
+    'Content-Type': types[path.extname(filePath)] || 'application/octet-stream',
+    'Content-Length': body.length,
+    'Cache-Control': production && path.extname(filePath) !== '.html' ? 'public, max-age=3600' : 'no-cache'
+  });
+  if (req.method === 'HEAD') res.end(); else res.end(body);
   return true;
 }
 
-function createApp({ dbPath = DEFAULT_DB_PATH, fetchImpl = globalThis.fetch } = {}) {
-  const db = openDatabase(dbPath);
-  const repository = createRepository(db);
-  const allowSteamRequest = createRateLimiter();
+function createApplication(options = {}) {
+  const env = { ...process.env, ...(options.env || {}) };
+  const dbPath = options.dbPath || env.DB_PATH || path.join(__dirname, 'data', 'backlog.sqlite');
+  const fetchImpl = options.fetchImpl || global.fetch;
+  const steamApiKey = String(env.STEAM_API_KEY || '').trim();
+  const adminToken = String(env.ADMIN_TOKEN || '').trim();
+  const metadataDelayMs = Math.max(250, Number(env.METADATA_DELAY_MS) || 1500);
+  const metadataLanguage = String(env.METADATA_LANGUAGE || 'french');
+  const metadataCountry = String(env.METADATA_COUNTRY || 'FR');
+  const production = env.NODE_ENV === 'production';
+  const trustProxy = booleanFromEnv(env.TRUST_PROXY, false);
+  if (!fetchImpl) throw new Error('fetch is required');
 
-  async function getSteam(appid, refresh = false) {
-    if (!refresh) {
-      const cached = repository.getMetadata(appid);
-      if (cached) return cached;
-    }
-    const metadata = await fetchSteamMetadata(appid, fetchImpl);
-    if (repository.hasGame(appid)) return repository.saveMetadata(appid, metadata);
-    return { appid, ...metadata, fetchedAt: new Date().toISOString(), cached: false };
-  }
+  if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  initializeDatabase(db);
+  const settings = createSettingsStore(db);
 
-  const handler = async (request, response) => {
-    securityHeaders(response);
-    const url = new URL(request.url, 'http://localhost');
-    const method = request.method || 'GET';
-
-    try {
-      if (method === 'GET' && url.pathname === '/healthz') {
-        return sendJson(response, 200, { status: 'ok', version: VERSION, storage: 'sqlite' });
-      }
-
-      if (method === 'GET' && url.pathname === '/api/library') {
-        return sendJson(response, 200, repository.getLibrary());
-      }
-
-      if (method === 'POST' && url.pathname === '/api/library/import') {
-        const body = await readJsonBody(request);
-        if (!Array.isArray(body.games)) return sendJson(response, 400, { error: 'Le champ games doit être une liste.' });
-        const result = repository.importGames(body.games, body.sourceName || '');
-        return sendJson(response, 200, result);
-      }
-
-      if (method === 'DELETE' && url.pathname === '/api/library') {
-        repository.clearLibrary();
-        return sendJson(response, 200, { cleared: true });
-      }
-
-      const steamMatch = url.pathname.match(/^\/api\/steam\/(\d+)$/);
-      if (method === 'GET' && steamMatch) {
-        const appid = validateAppid(steamMatch[1]);
-        if (!appid) return sendJson(response, 400, { error: 'AppID invalide.' });
-        const client = request.socket.remoteAddress || 'unknown';
-        if (!allowSteamRequest(client)) return sendJson(response, 429, { error: 'Trop de requêtes. Réessaie dans une minute.' });
-        const metadata = await getSteam(appid, url.searchParams.get('refresh') === '1');
-        return sendJson(response, 200, metadata);
-      }
-
-      if (method === 'POST' && url.pathname === '/api/library/enrich') {
-        const body = await readJsonBody(request);
-        if (!Array.isArray(body.appids) || body.appids.length < 1 || body.appids.length > MAX_ENRICH_BATCH) {
-          return sendJson(response, 400, { error: `Choisis entre 1 et ${MAX_ENRICH_BATCH} jeux.` });
-        }
-        const appids = [...new Set(body.appids.map(validateAppid).filter(Boolean))];
-        if (!appids.length) return sendJson(response, 400, { error: 'Aucun AppID valide.' });
-        const results = [];
-        for (const appid of appids) {
-          if (!repository.hasGame(appid)) {
-            results.push({ appid, ok: false, error: 'Ce jeu n’appartient pas à la bibliothèque.' });
-            continue;
-          }
-          try {
-            const metadata = await getSteam(appid, Boolean(body.refresh));
-            results.push({ ...metadata, ok: true });
-          } catch (error) {
-            results.push({ appid, ok: false, error: error.message });
-          }
-        }
-        return sendJson(response, 200, { results });
-      }
-
-      if (method === 'GET' || method === 'HEAD') {
-        if (serveStatic(url.pathname, response)) return;
-      }
-      return sendJson(response, 404, { error: 'Ressource introuvable.' });
-    } catch (error) {
-      console.error(error);
-      return sendJson(response, error.statusCode || 502, { error: error.message || 'Erreur interne.' });
-    }
+  const job = {
+    running: false,
+    pauseRequested: false,
+    currentAppid: null,
+    startedAt: null,
+    stoppedAt: null,
+    processedThisRun: 0,
+    lastMessage: 'En attente d’un lancement manuel.'
   };
 
+  function requireAdmin(req) {
+    if (!adminToken) throw new HttpError(503, 'Administration désactivée : configure ADMIN_TOKEN dans Dockge.', 'admin_not_configured');
+    if (!constantTimeEqual(req.headers['x-admin-token'] || '', adminToken)) {
+      throw new HttpError(401, "Jeton d'administration incorrect.", 'unauthorized');
+    }
+  }
+
+  function publicGame(row) {
+    return {
+      appid: Number(row.appid),
+      name: row.name || `App ${row.appid}`,
+      playtime_forever: Number(row.playtime_forever || 0),
+      playtime_windows_forever: Number(row.playtime_windows_forever || 0),
+      playtime_mac_forever: Number(row.playtime_mac_forever || 0),
+      playtime_linux_forever: Number(row.playtime_linux_forever || 0),
+      rtime_last_played: Number(row.rtime_last_played || 0),
+      img_icon_url: row.img_icon_url || '',
+      genres: safeJsonParse(row.genres, []),
+      metadata_status: STATUS_VALUES.includes(row.metadata_status) ? row.metadata_status : 'pending',
+      metadata_error: row.metadata_error || null,
+      metadata_updated_at: row.metadata_updated_at || null,
+      header_image: `https://cdn.cloudflare.steamstatic.com/steam/apps/${Number(row.appid)}/header.jpg`
+    };
+  }
+
+  function statusSnapshot() {
+    const total = Number(db.prepare('SELECT COUNT(*) AS count FROM games').get().count);
+    const rows = db.prepare('SELECT metadata_status AS status, COUNT(*) AS count FROM games GROUP BY metadata_status').all();
+    const counts = Object.fromEntries(STATUS_VALUES.map((status) => [status, 0]));
+    for (const row of rows) counts[row.status] = Number(row.count);
+    const completed = counts.synced + counts.unavailable;
+    return { ...job, total, counts, completed, percent: total ? Math.round((completed / total) * 1000) / 10 : 0 };
+  }
+
+  async function resolveSteamId(profileInput) {
+    const normalized = normalizeProfileInput(profileInput);
+    if (normalized.type === 'steamid') return normalized.value;
+    if (!steamApiKey) throw new HttpError(503, 'La clé Steam Web API n’est pas configurée.', 'steam_key_missing');
+    const url = new URL('https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/');
+    url.searchParams.set('key', steamApiKey);
+    url.searchParams.set('vanityurl', normalized.value);
+    const data = await fetchJson(fetchImpl, url);
+    if (Number(data?.response?.success) !== 1 || !data?.response?.steamid) {
+      throw new HttpError(404, 'Ce profil Steam personnalisé est introuvable.', 'profile_not_found');
+    }
+    return String(data.response.steamid);
+  }
+
+  async function getPlayerSummary(steamid) {
+    const url = new URL('https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/');
+    url.searchParams.set('key', steamApiKey);
+    url.searchParams.set('steamids', steamid);
+    const data = await fetchJson(fetchImpl, url);
+    return data?.response?.players?.[0] || null;
+  }
+
+  async function getOwnedGames(steamid) {
+    const url = new URL('https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/');
+    url.searchParams.set('key', steamApiKey);
+    url.searchParams.set('steamid', steamid);
+    url.searchParams.set('include_appinfo', 'true');
+    url.searchParams.set('include_played_free_games', 'true');
+    url.searchParams.set('format', 'json');
+    const data = await fetchJson(fetchImpl, url, { timeoutMs: 30000 });
+    const response = data?.response;
+    if (!response || (!Array.isArray(response.games) && response.game_count == null)) {
+      throw new HttpError(403, 'La liste des jeux de ce profil n’est pas publique ou n’est pas accessible.', 'games_private');
+    }
+    return Array.isArray(response.games) ? response.games : [];
+  }
+
+  const upsertGame = db.prepare(`
+    INSERT INTO games (
+      appid, name, playtime_forever, playtime_windows_forever, playtime_mac_forever,
+      playtime_linux_forever, rtime_last_played, img_icon_url, genres, metadata_status,
+      source_steamid, last_seen_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?, ?, ?)
+    ON CONFLICT(appid) DO UPDATE SET
+      name = excluded.name,
+      playtime_forever = excluded.playtime_forever,
+      playtime_windows_forever = excluded.playtime_windows_forever,
+      playtime_mac_forever = excluded.playtime_mac_forever,
+      playtime_linux_forever = excluded.playtime_linux_forever,
+      rtime_last_played = excluded.rtime_last_played,
+      img_icon_url = excluded.img_icon_url,
+      source_steamid = excluded.source_steamid,
+      last_seen_at = excluded.last_seen_at,
+      updated_at = excluded.updated_at
+  `);
+
+  function importGames(steamid, profileName, games) {
+    transaction(db, () => {
+      const timestamp = nowIso();
+      for (const game of games) {
+        upsertGame.run(
+          Number(game.appid), String(game.name || `App ${game.appid}`).slice(0, 300),
+          Number(game.playtime_forever || 0), Number(game.playtime_windows_forever || 0),
+          Number(game.playtime_mac_forever || 0), Number(game.playtime_linux_forever || 0),
+          Number(game.rtime_last_played || 0), String(game.img_icon_url || '').slice(0, 200),
+          steamid, timestamp, timestamp, timestamp
+        );
+      }
+      db.prepare('DELETE FROM games WHERE source_steamid IS NULL OR source_steamid <> ? OR last_seen_at <> ?').run(steamid, timestamp);
+      settings.set('active_steamid', steamid);
+      settings.set('active_profile_name', profileName || steamid);
+      settings.set('last_library_sync_at', timestamp);
+      settings.set('last_library_sync_count', games.length);
+    });
+  }
+
+  async function importPublicProfile(profileInput) {
+    if (!steamApiKey) throw new HttpError(503, 'Configure STEAM_API_KEY dans Dockge avant la synchronisation.', 'steam_key_missing');
+    const steamid = await resolveSteamId(profileInput);
+    const startedAt = nowIso();
+    const run = db.prepare("INSERT INTO sync_runs(steamid, status, started_at) VALUES (?, 'running', ?)").run(steamid, startedAt);
+    try {
+      const [summary, games] = await Promise.all([getPlayerSummary(steamid), getOwnedGames(steamid)]);
+      if (!summary) throw new HttpError(404, 'Profil Steam introuvable.', 'profile_not_found');
+      const profileName = String(summary.personaname || steamid).slice(0, 200);
+      importGames(steamid, profileName, games);
+      const finishedAt = nowIso();
+      db.prepare("UPDATE sync_runs SET profile_name = ?, game_count = ?, status = 'success', message = ?, finished_at = ? WHERE id = ?")
+        .run(profileName, games.length, `${games.length} jeu(x) synchronisé(s).`, finishedAt, run.lastInsertRowid);
+      return { steamid, profileName, gameCount: games.length, syncedAt: finishedAt };
+    } catch (error) {
+      db.prepare("UPDATE sync_runs SET status = 'error', message = ?, finished_at = ? WHERE id = ?")
+        .run(String(error.message || 'Erreur de synchronisation').slice(0, 500), nowIso(), run.lastInsertRowid);
+      throw error;
+    }
+  }
+
+  async function enrichOne(row) {
+    const appid = Number(row.appid);
+    db.prepare("UPDATE games SET metadata_status = 'syncing', metadata_error = NULL, updated_at = ? WHERE appid = ?").run(nowIso(), appid);
+    job.currentAppid = appid;
+    try {
+      const url = new URL('https://store.steampowered.com/api/appdetails');
+      url.searchParams.set('appids', String(appid));
+      url.searchParams.set('l', metadataLanguage);
+      url.searchParams.set('cc', metadataCountry);
+      const payload = await fetchJson(fetchImpl, url);
+      const entry = payload?.[String(appid)];
+      if (!entry?.success || !entry.data) {
+        const timestamp = nowIso();
+        db.prepare(`UPDATE games SET metadata_status = 'unavailable', metadata_error = ?, metadata_attempts = metadata_attempts + 1,
+          metadata_updated_at = ?, next_retry_at = NULL, updated_at = ? WHERE appid = ?`)
+          .run('Métadonnées indisponibles sur le magasin Steam.', timestamp, timestamp, appid);
+        return;
+      }
+      const genres = Array.isArray(entry.data.genres)
+        ? entry.data.genres.map((genre) => String(genre.description || '').trim()).filter(Boolean)
+        : [];
+      const timestamp = nowIso();
+      db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = 'synced',
+        metadata_error = NULL, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
+        next_retry_at = NULL, updated_at = ? WHERE appid = ?`)
+        .run(String(entry.data.name || '').slice(0, 300), JSON.stringify(genres), timestamp, timestamp, appid);
+    } catch (error) {
+      const attempts = Number(row.metadata_attempts || 0) + 1;
+      const retrySeconds = error.retryAfter || Math.min(3600, 30 * (2 ** Math.min(attempts - 1, 6)));
+      const timestamp = nowIso();
+      const retryAt = new Date(Date.now() + retrySeconds * 1000).toISOString();
+      db.prepare(`UPDATE games SET metadata_status = 'temporary_error', metadata_error = ?, metadata_attempts = ?,
+        metadata_updated_at = ?, next_retry_at = ?, updated_at = ? WHERE appid = ?`)
+        .run(String(error.message || 'Erreur temporaire').slice(0, 500), attempts, timestamp, retryAt, timestamp, appid);
+    }
+  }
+
+  async function runEnrichment() {
+    if (job.running) return;
+    job.running = true;
+    job.pauseRequested = false;
+    job.startedAt = nowIso();
+    job.stoppedAt = null;
+    job.processedThisRun = 0;
+    job.lastMessage = 'Enrichissement en cours.';
+    try {
+      while (!job.pauseRequested) {
+        const row = db.prepare(`SELECT appid, metadata_attempts FROM games
+          WHERE metadata_status = 'pending'
+             OR (metadata_status = 'temporary_error' AND (next_retry_at IS NULL OR next_retry_at <= ?))
+          ORDER BY CASE metadata_status WHEN 'pending' THEN 0 ELSE 1 END, metadata_attempts ASC, appid ASC LIMIT 1`).get(nowIso());
+        if (!row) {
+          job.lastMessage = 'Aucun jeu éligible à enrichir pour le moment.';
+          break;
+        }
+        await enrichOne(row);
+        job.processedThisRun += 1;
+        job.currentAppid = null;
+        if (!job.pauseRequested) await sleep(metadataDelayMs);
+      }
+      if (job.pauseRequested) job.lastMessage = 'Enrichissement suspendu.';
+    } finally {
+      job.currentAppid = null;
+      job.running = false;
+      job.stoppedAt = nowIso();
+    }
+  }
+
+  function createBackup(scope) {
+    if (dbPath === ':memory:') return null;
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    const backupsDir = path.join(path.dirname(dbPath), 'backups');
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const destination = path.join(backupsDir, `backlog-${timestamp}-${scope}.sqlite`);
+    fs.copyFileSync(dbPath, destination);
+    return path.basename(destination);
+  }
+
+  async function handleApi(req, res, url) {
+    const pathname = url.pathname;
+    if (req.method === 'GET' && pathname === '/healthz') return sendJson(res, 200, { status: 'ok', version: VERSION });
+    if (req.method === 'GET' && pathname === '/api/config') {
+      return sendJson(res, 200, {
+        version: VERSION,
+        steamApiConfigured: Boolean(steamApiKey),
+        adminConfigured: Boolean(adminToken),
+        activeSteamId: settings.get('active_steamid'),
+        activeProfileName: settings.get('active_profile_name'),
+        lastLibrarySyncAt: settings.get('last_library_sync_at'),
+        lastLibrarySyncCount: Number(settings.get('last_library_sync_count', 0))
+      });
+    }
+    if (req.method === 'GET' && pathname === '/api/library') {
+      const games = db.prepare('SELECT * FROM games ORDER BY name COLLATE NOCASE, appid').all().map(publicGame);
+      const totalMinutes = games.reduce((sum, game) => sum + game.playtime_forever, 0);
+      const neverPlayed = games.filter((game) => game.playtime_forever === 0).length;
+      return sendJson(res, 200, {
+        games,
+        stats: { total: games.length, neverPlayed, played: games.length - neverPlayed, totalHours: Math.round((totalMinutes / 60) * 10) / 10 },
+        profile: { steamid: settings.get('active_steamid'), name: settings.get('active_profile_name'), lastSyncAt: settings.get('last_library_sync_at') }
+      });
+    }
+    if (req.method === 'GET' && pathname === '/api/enrichment/status') return sendJson(res, 200, statusSnapshot());
+    if (req.method === 'GET' && pathname === '/api/sync/history') {
+      const history = db.prepare(`SELECT steamid, profile_name, game_count, status, message, started_at, finished_at
+        FROM sync_runs ORDER BY id DESC LIMIT 10`).all();
+      return sendJson(res, 200, { history });
+    }
+    if (req.method === 'POST' && pathname === '/api/import/steam') {
+      requireAdmin(req);
+      const body = await readJson(req);
+      return sendJson(res, 200, await importPublicProfile(body.profile));
+    }
+    if (req.method === 'POST' && pathname === '/api/enrichment/start') {
+      requireAdmin(req);
+      if (job.running) throw new HttpError(409, 'Un enrichissement est déjà en cours.', 'job_running');
+      void runEnrichment();
+      return sendJson(res, 202, { message: 'Enrichissement lancé.', status: statusSnapshot() });
+    }
+    if (req.method === 'POST' && pathname === '/api/enrichment/pause') {
+      requireAdmin(req);
+      if (!job.running) throw new HttpError(409, 'Aucun enrichissement n’est en cours.', 'job_not_running');
+      job.pauseRequested = true;
+      return sendJson(res, 202, { message: 'Suspension demandée après la requête en cours.', status: statusSnapshot() });
+    }
+    if (req.method === 'POST' && pathname === '/api/enrichment/retry-errors') {
+      requireAdmin(req);
+      const result = db.prepare(`UPDATE games SET metadata_status = 'pending', metadata_error = NULL, next_retry_at = NULL, updated_at = ?
+        WHERE metadata_status IN ('temporary_error', 'unavailable')`).run(nowIso());
+      return sendJson(res, 200, { reset: Number(result.changes) });
+    }
+    if (req.method === 'POST' && pathname === '/api/admin/reset') {
+      requireAdmin(req);
+      const body = await readJson(req);
+      const scope = String(body.scope || '');
+      if (!['metadata', 'library', 'all'].includes(scope)) throw new HttpError(400, 'Portée de réinitialisation invalide.', 'invalid_reset_scope');
+      if (String(body.confirmation || '') !== 'REINITIALISER') throw new HttpError(400, 'Confirmation incorrecte.', 'confirmation_required');
+      if (job.running) throw new HttpError(409, 'Suspends l’enrichissement avant de réinitialiser les données.', 'job_running');
+      const backup = createBackup(scope);
+      let affected = 0;
+      if (scope === 'metadata') {
+        affected = Number(db.prepare(`UPDATE games SET genres = '[]', metadata_status = 'pending', metadata_error = NULL,
+          metadata_attempts = 0, metadata_updated_at = NULL, next_retry_at = NULL, updated_at = ?`).run(nowIso()).changes);
+      } else if (scope === 'library') {
+        affected = Number(db.prepare('DELETE FROM games').run().changes);
+        for (const key of ['active_steamid', 'active_profile_name', 'last_library_sync_at', 'last_library_sync_count']) settings.remove(key);
+      } else {
+        affected = transaction(db, () => {
+          const count = Number(db.prepare('DELETE FROM games').run().changes);
+          db.prepare('DELETE FROM sync_runs').run();
+          db.prepare('DELETE FROM settings').run();
+          return count;
+        });
+      }
+      return sendJson(res, 200, { scope, affected, backup });
+    }
+    throw new HttpError(404, 'Ressource introuvable.', 'not_found');
+  }
+
+  async function handler(req, res) {
+    try {
+      const host = trustProxy ? String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost') : String(req.headers.host || 'localhost');
+      const url = new URL(req.url, `http://${host}`);
+      if (url.pathname === '/healthz' || url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
+      if (staticResponse(req, res, url.pathname, production)) return;
+      sendJson(res, 404, { error: 'Ressource introuvable.', code: 'not_found' });
+    } catch (error) {
+      const status = Number(error.status) || 500;
+      if (status >= 500) console.error(`[backlog] ${error.code || 'error'}: ${error.message}`);
+      if (!res.headersSent) sendJson(res, status, { error: status === 500 ? 'Erreur interne du serveur.' : error.message, code: error.code || 'internal_error' });
+      else res.destroy();
+    }
+  }
+
   return {
+    app: { listen(...args) { return http.createServer(handler).listen(...args); } },
     handler,
-    repository,
     db,
-    close() { db.close(); }
+    settings,
+    job,
+    close() { job.pauseRequested = true; db.close(); }
   };
 }
 
 if (require.main === module) {
-  const app = createApp();
-  const server = http.createServer(app.handler);
-  server.listen(DEFAULT_PORT, '0.0.0.0', () => {
-    console.log(`Backlog v${VERSION} écoute sur le port ${DEFAULT_PORT}; SQLite: ${DEFAULT_DB_PATH}`);
+  const port = Number(process.env.PORT) || 3000;
+  const host = process.env.HOST || '0.0.0.0';
+  const application = createApplication();
+  const server = http.createServer(application.handler);
+  server.listen(port, host, () => {
+    console.log(`Backlog v${VERSION} écoute sur ${host}:${port}`);
+    console.log(`Steam Web API : ${process.env.STEAM_API_KEY ? 'configurée' : 'non configurée'}`);
+    console.log(`Administration : ${process.env.ADMIN_TOKEN ? 'protégée' : 'désactivée (ADMIN_TOKEN absent)'}`);
   });
-  const shutdown = () => server.close(() => { app.close(); process.exit(0); });
+  const shutdown = () => {
+    application.job.pauseRequested = true;
+    server.close(() => { application.close(); process.exit(0); });
+  };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }
 
-module.exports = { VERSION, createApp, normalizeGame, validateAppid, fetchSteamMetadata };
+module.exports = { createApplication, normalizeProfileInput, VERSION };

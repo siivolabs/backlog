@@ -1,19 +1,15 @@
-# Changelog
+# Journal des modifications
 
-## 0.5.0 — 2026-11-16
+## 0.6.0 — Imports et enrichissement progressif
 
-### Ajouté
-- Base SQLite persistante pour les jeux, l’état d’import et les métadonnées Steam.
-- Restauration automatique de la bibliothèque au chargement de la page.
-- Volume Docker nommé `backlog_data` monté sur `/data`.
-- Routes `GET /api/library`, `POST /api/library/import`, `DELETE /api/library` et `POST /api/library/enrich`.
-- Tests de persistance, de cache et de limite des lots.
-
-### Corrigé
-- Le message « La bibliothèque est vide » est masqué quand des jeux sont visibles.
-- Un message distinct s’affiche lorsqu’une bibliothèque importée ne contient aucun résultat correspondant aux filtres.
-
-### Conservé
-- Présentation générale de la v0.4.
-- Import Steam, jaquettes, statistiques, recherche, filtres, tri, pagination et affichages grille/liste.
-- Test d’un AppID et enrichissement séquentiel limité à dix jeux.
+- Remplacement de l’import manuel `response.txt` par une synchronisation serveur via `GetOwnedGames`.
+- Prise en charge d’un SteamID64, d’une URL `/profiles/`, d’une URL `/id/` ou d’un nom personnalisé.
+- Clé Steam Web API conservée uniquement dans `STEAM_API_KEY`, jamais renvoyée au navigateur.
+- Protection des mutations par `ADMIN_TOKEN`.
+- Synchronisation atomique d’un profil public, avec conservation des métadonnées des jeux communs.
+- Lancement et suspension manuels de l’enrichissement progressif.
+- Temporisation entre les requêtes, gestion de HTTP 429, erreurs temporaires et reprises.
+- Barre de progression et badge d’état par jeu.
+- Sauvegarde SQLite avant réinitialisation des métadonnées, de la bibliothèque ou de toutes les données.
+- Migration non destructive de la base V0.5.
+- Conservation de l’interface visuelle et correction durable de l’état vide.

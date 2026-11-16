@@ -1,106 +1,128 @@
-# Backlog v0.5
+# Backlog v0.6
 
-Backlog v0.5 conserve l’interface et l’ergonomie de la v0.4, mais déplace la bibliothèque Steam et les métadonnées enrichies dans une base **SQLite persistante**.
+Backlog est une bibliothèque Steam auto-hébergée. La V0.6 se concentre sur les **imports depuis un profil public** et sur l’**enrichissement progressif** des métadonnées.
 
-## Ce qui change en v0.5
+## Nouveautés
 
-- La bibliothèque importée est restaurée automatiquement après un rechargement, une nouvelle session ou un redémarrage du conteneur.
-- Les genres récupérés auprès de Steam sont enregistrés dans SQLite et restent disponibles entre les sessions.
-- Le volume Docker nommé `backlog_data` conserve `/data/backlog.sqlite` lors du remplacement de l’image ou de la recréation du conteneur.
-- Le message **« La bibliothèque est vide »** disparaît dès que des résultats sont affichés.
-- Si une bibliothèque existe mais qu’un filtre ne renvoie rien, l’interface affiche **« Aucun jeu ne correspond à vos critères »**.
+- plus d’import de `response.txt` ;
+- synchronisation avec un SteamID64, un nom personnalisé ou une URL de profil Steam ;
+- clé Web API utilisée uniquement côté serveur ;
+- prise en charge de n’importe quel profil dont les **détails de jeux sont publics** ;
+- lancement et suspension manuels de l’enrichissement ;
+- progression globale et badge d’état par jeu ;
+- reprise des jeux en attente après redémarrage ;
+- sauvegarde automatique avant chaque réinitialisation ;
+- migration de la base V0.5 sans perte des jeux ni genres déjà présents.
 
-L’apparence, les cartes, les statistiques, la recherche, les filtres, le tri, la pagination, l’affichage grille/liste et le lot d’enrichissement limité à dix jeux restent dans la continuité de la v0.4.
+## Configuration requise dans Dockge
 
-## Arborescence
+Dans l’éditeur de la stack, renseigner deux variables d’environnement :
 
-```text
-backlog/
-├── .github/workflows/docker-publish.yml
-├── public/
-│   ├── index.html
-│   ├── styles.css
-│   └── app.js
-├── test/server.test.js
-├── .dockerignore
-├── CHANGELOG.md
-├── compose.yaml
-├── Dockerfile
-├── package.json
-└── server.js
+```yaml
+environment:
+  STEAM_API_KEY: ta_cle_web_api_steam
+  ADMIN_TOKEN: un_secret_long_et_aleatoire
 ```
 
-## Stockage SQLite
+La clé Steam se crée sur <https://steamcommunity.com/dev/apikey>. `ADMIN_TOKEN` protège les imports, l’enrichissement et les réinitialisations. Aucun des deux secrets n’est renvoyé par `/api/config` ni inscrit dans les journaux.
 
-Par défaut :
+Le compose complet fourni conserve le montage :
 
-```text
-/data/backlog.sqlite
+```yaml
+volumes:
+  - ./data:/data
 ```
 
-Le fichier principal et ses éventuels fichiers WAL restent dans le volume `backlog_data`. Ne retire pas ce volume lors d’un simple déploiement d’une nouvelle image.
-
-Sauvegarde facultative depuis le NAS :
+Si le conteneur ne peut pas écrire dans `./data`, créer le dossier depuis le répertoire de la stack et l’attribuer à l’UID 1000 :
 
 ```bash
-docker run --rm \
-  -v backlog_backlog_data:/data:ro \
-  -v "$PWD":/backup \
-  alpine sh -c 'tar czf /backup/backlog-data.tgz -C /data .'
+mkdir -p data
+sudo chown 1000:1000 data
 ```
 
-Le nom réel du volume peut être préfixé par le nom de la stack Dockge. Vérifie-le avec `docker volume ls`.
+## Déploiement
 
-## Publication avec GitHub Web
+1. Examiner les fichiers de l’archive.
+2. Remplacer les fichiers du dépôt GitHub par cette version en conservant la branche `main`.
+3. Renseigner `STEAM_API_KEY` et `ADMIN_TOKEN` dans la stack Dockge.
+4. Attendre la reconstruction de `ghcr.io/siivolabs/backlog:dev`.
+5. Dans Dockge, effectuer **Pull**, puis recréer le conteneur.
+6. Ouvrir `http://backlog.home/`.
+7. Saisir le jeton d’administration, puis synchroniser le profil.
 
-1. Décompresse l’archive.
-2. Remplace les fichiers correspondants dans `siivolabs/backlog`.
-3. Conserve ton workflow existant s’il est déjà opérationnel ; le workflow fourni est compatible avec le tag `dev`.
-4. Valide avec un message comme :
+La première ouverture migre automatiquement la base V0.5. Faire malgré tout une copie de `data/backlog.sqlite` avant le déploiement est recommandé.
+
+## Synchroniser un profil public
+
+Sont acceptés :
 
 ```text
-Add SQLite persistence in Backlog v0.5
+7656119xxxxxxxxxx
+mon-nom-personnalise
+https://steamcommunity.com/profiles/7656119xxxxxxxxxx
+https://steamcommunity.com/id/mon-nom-personnalise
 ```
 
-5. Attends la réussite de GitHub Actions.
+La synchronisation remplace la bibliothèque active par celle du profil demandé. Les métadonnées déjà obtenues sont conservées pour les AppID présents dans les deux bibliothèques. Steam ne renvoie la liste que si l’option **Détails des jeux** du profil est publique.
 
-## Déploiement dans Dockge
+## Enrichissement
 
-Le `compose.yaml` fourni suppose que Nginx Proxy Manager et Backlog partagent le réseau externe `npm_default`, et que le Proxy Host transmet vers `backlog-test:3000`.
+L’enrichissement ne démarre jamais tout seul. Le bouton **Lancer** traite les jeux en attente un par un. La temporisation par défaut est de 1 500 ms et peut être réglée avec :
 
-1. Remplace la configuration Compose par celle de la v0.5.
-2. Dans Dockge, effectue **Pull**.
-3. Recrée le conteneur.
-4. N’utilise pas une option qui supprime les volumes.
-5. Ouvre `http://backlog.home/`.
+```yaml
+METADATA_DELAY_MS: 1500
+```
 
-Le nouveau volume sera créé automatiquement au premier lancement.
+Les états persistés sont :
 
-## Recette recommandée
+- `pending` : en attente ;
+- `syncing` : requête en cours ;
+- `synced` : métadonnées récupérées ;
+- `temporary_error` : réessai ultérieur possible ;
+- `unavailable` : aucune fiche disponible.
 
-1. Ouvrir `/healthz` et vérifier `{"status":"ok","version":"0.5.0","storage":"sqlite"}`.
-2. Importer `response.txt` et vérifier les nombres habituels.
-3. Confirmer que **« La bibliothèque est vide »** n’est plus visible quand les cartes sont affichées.
-4. Recharger la page : la bibliothèque doit revenir sans nouvel import.
-5. Enrichir jusqu’à dix jeux.
-6. Recharger la page puis redémarrer le conteneur : les genres doivent toujours être présents.
-7. Appliquer une recherche impossible : seul **« Aucun jeu ne correspond à vos critères »** doit apparaître.
-8. Tester l’AppID `400` et un AppID invalide.
+Un état `syncing` interrompu par un redémarrage repasse automatiquement à `pending`.
 
-## Développement local
+## Réinitialisations et sauvegardes
 
-Backlog n’a aucune dépendance npm externe. Il utilise `node:sqlite`, disponible à partir de Node 22.5 ; l’image fournie utilise Node 24.
+L’interface propose :
+
+- métadonnées uniquement ;
+- bibliothèque uniquement ;
+- toutes les données applicatives.
+
+Une copie cohérente de la base est créée avant l’opération dans :
+
+```text
+data/backups/
+```
+
+La clé API et le jeton restent dans l’environnement du conteneur : une réinitialisation SQLite ne les efface pas.
+
+## Pourquoi SteamDB semble ne pas avoir de limite ?
+
+SteamDB n’effectue pas une requête Store par jeu à chaque visiteur. Le service maintient sa propre base, utilise SteamKit et le flux de changements de Steam, met les résultats en cache et ne rafraîchit que les applications modifiées. SteamDB indique aussi qu’il parse certaines pages Store et qu’il interdit le scraping automatisé de son propre site. Backlog ne doit donc pas utiliser SteamDB comme API.
+
+Le Store Steam ne publie pas de quota contractuel précis pour l’endpoint `appdetails`. Backlog applique par prudence une file séquentielle, une temporisation, la gestion de `429 Retry-After` et des reprises. La Web API officielle, elle, est utilisée pour `GetOwnedGames` avec la clé configurée.
+
+## API principale
+
+| Méthode | Route | Protection | Fonction |
+|---|---|---|---|
+| `GET` | `/healthz` | publique | Santé et version |
+| `GET` | `/api/config` | publique, sans secrets | État de configuration |
+| `GET` | `/api/library` | publique | Bibliothèque persistée |
+| `POST` | `/api/import/steam` | `X-Admin-Token` | Synchroniser un profil |
+| `GET` | `/api/enrichment/status` | publique | Progression |
+| `POST` | `/api/enrichment/start` | `X-Admin-Token` | Démarrer |
+| `POST` | `/api/enrichment/pause` | `X-Admin-Token` | Suspendre |
+| `POST` | `/api/enrichment/retry-errors` | `X-Admin-Token` | Replacer les erreurs en attente |
+| `POST` | `/api/admin/reset` | `X-Admin-Token` + confirmation | Réinitialiser avec sauvegarde |
+
+## Tests
 
 ```bash
 npm test
-npm run check
-DB_PATH=./backlog.sqlite npm start
 ```
 
-## Sécurité et limites
-
-- Conteneur non privilégié, capacités Linux retirées et système de fichiers racine en lecture seule.
-- Écriture limitée au volume `/data` et à un petit `tmpfs`.
-- Validation des AppID, limite de taille d’import et limite de requêtes vers Steam.
-- Aucun compte utilisateur ni authentification : garde le Proxy Host sur ton réseau local ou protège-le.
-- Aucun enrichissement massif automatique : un lot reste limité à dix jeux.
+Les tests n’appellent pas Steam : les réponses amont sont simulées.

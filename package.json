@@ -1,17 +1,15 @@
 {
-  "name": "backlog",
-  "version": "0.5.0",
+  "name": "siivolabs-backlog",
+  "version": "0.6.0",
   "private": true,
-  "description": "Bibliothèque Steam auto-hébergée avec cache SQLite persistant",
-  "type": "commonjs",
+  "description": "Bibliothèque Steam auto-hébergée avec synchronisation et enrichissement progressif",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test",
-    "check": "node --check server.js && node --check public/app.js"
+    "test": "node --test --test-reporter=spec"
   },
   "engines": {
-    "node": ">=22.5.0"
-  },
-  "license": "UNLICENSED"
+    "node": ">=24"
+  }
 }

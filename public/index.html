@@ -4,80 +4,138 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Backlog v0.5 — Bibliothèque Steam</title>
+  <title>Backlog — Bibliothèque Steam</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <main class="shell">
-    <header class="page-header">
-      <div class="brand"><span aria-hidden="true">🎮</span><h1>Backlog</h1><span class="version">v0.5</span></div>
-      <p>Ta bibliothèque Steam, servie depuis ton conteneur et enrichie progressivement.</p>
+    <header class="hero">
+      <div>
+        <h1><span aria-hidden="true">🎮</span> Backlog <span class="version">v0.6</span></h1>
+        <p>Ta bibliothèque Steam, synchronisée depuis un profil public et enrichie progressivement.</p>
+      </div>
+      <div id="serviceState" class="service-state">Connexion…</div>
     </header>
 
-    <section class="panel import-panel" aria-labelledby="import-title">
-      <div class="panel-heading">
-        <div><span class="eyebrow">Bibliothèque locale</span><h2 id="import-title">Importer l’export Steam</h2></div>
-        <span class="pill">Même origine</span>
+    <section class="panel admin-panel" aria-labelledby="importTitle">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Bibliothèque Steam</span>
+          <h2 id="importTitle">Synchroniser un profil public</h2>
+        </div>
+        <span id="apiBadge" class="pill pill-neutral">Clé API : vérification…</span>
       </div>
-      <div class="button-row">
-        <label class="button button-primary" for="fileInput">Importer response.txt / JSON</label>
-        <input id="fileInput" type="file" accept=".txt,.json,application/json,text/plain" hidden>
-        <button id="clearButton" class="button button-secondary" type="button">Effacer la session</button>
+      <div class="admin-grid">
+        <label class="field field-wide">
+          <span>SteamID64, nom personnalisé ou URL du profil</span>
+          <input id="profileInput" autocomplete="off" placeholder="7656119… ou https://steamcommunity.com/id/…">
+        </label>
+        <label class="field">
+          <span>Jeton d’administration</span>
+          <input id="adminToken" type="password" autocomplete="off" placeholder="ADMIN_TOKEN">
+        </label>
+        <div class="field action-field">
+          <span>&nbsp;</span>
+          <button id="syncButton" class="button button-primary" type="button">Synchroniser la bibliothèque</button>
+        </div>
       </div>
-      <p id="importStatus" class="status success" role="status">La bibliothèque enregistrée sera restaurée automatiquement.</p>
-      <p class="hint">Le fichier est envoyé uniquement à ton conteneur Backlog et conservé dans SQLite. N’importe pas de fichier contenant ta clé API.</p>
+      <div class="panel-footer">
+        <p id="syncSummary">Aucune synchronisation chargée.</p>
+        <button id="openResetButton" class="button button-danger-quiet" type="button">Réinitialiser les données</button>
+      </div>
+      <p class="help">La clé Steam reste exclusivement dans le conteneur. Le jeton saisi ici reste en mémoire dans cet onglet et n’est jamais enregistré dans la base.</p>
     </section>
 
     <section class="stats" aria-label="Statistiques de la bibliothèque">
-      <article><span>Jeux importés</span><strong id="statImported">0</strong></article>
-      <article><span>Jamais lancés</span><strong id="statUnplayed">0</strong></article>
-      <article><span>Heures enregistrées</span><strong id="statHours">0</strong></article>
-      <article><span>Résultats</span><strong id="statResults">0</strong></article>
+      <article class="stat"><span>Jeux synchronisés</span><strong id="totalGames">0</strong></article>
+      <article class="stat"><span>Jamais lancés</span><strong id="neverPlayed">0</strong></article>
+      <article class="stat"><span>Heures enregistrées</span><strong id="totalHours">0</strong></article>
+      <article class="stat"><span>Jeux déjà lancés</span><strong id="playedGames">0</strong></article>
     </section>
 
-    <section class="panel enrich-panel" aria-labelledby="enrich-title">
-      <div class="panel-heading">
-        <div><span class="eyebrow">Nouveau dans v0.4</span><h2 id="enrich-title">Genres Steam via le proxy local</h2></div>
-        <span class="pill pill-green">Maximum 10 jeux par lot</span>
-      </div>
-      <div class="enrich-grid">
-        <form id="appidForm" class="appid-test">
-          <label for="appidInput">Tester un AppID</label>
-          <div class="input-action"><input id="appidInput" inputmode="numeric" pattern="[0-9]+" value="400" aria-label="AppID Steam"><button class="button button-secondary" type="submit">Tester</button></div>
-        </form>
-        <div class="batch-enrich">
-          <label for="enrichButton">Enrichir les premiers résultats visibles</label>
-          <button id="enrichButton" class="button button-primary button-wide" type="button">Enrichir jusqu’à 10 jeux</button>
+    <section class="panel enrichment-panel" aria-labelledby="enrichmentTitle">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Métadonnées Steam</span>
+          <h2 id="enrichmentTitle">Enrichissement progressif</h2>
+        </div>
+        <div class="button-row">
+          <button id="retryButton" class="button button-secondary" type="button">Réessayer les erreurs</button>
+          <button id="pauseButton" class="button button-secondary" type="button" disabled>Suspendre</button>
+          <button id="startButton" class="button button-primary" type="button">Lancer</button>
         </div>
       </div>
-      <p class="hint">Les requêtes passent par <code>/api/steam/:appid</code>. Les genres sont désormais conservés dans SQLite entre les sessions.</p>
-      <pre id="enrichLog" class="log" aria-live="polite">Prêt. Aucun enrichissement automatique n’est lancé.</pre>
+      <div class="progress-copy">
+        <span id="progressMessage">En attente d’un lancement manuel.</span>
+        <strong id="progressPercent">0 %</strong>
+      </div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progressBar" class="progress-bar"></div>
+      </div>
+      <div class="status-legend" aria-label="Répartition des états">
+        <span class="legend-item"><i class="dot dot-pending"></i><b id="countPending">0</b> en attente</span>
+        <span class="legend-item"><i class="dot dot-syncing"></i><b id="countSyncing">0</b> en cours</span>
+        <span class="legend-item"><i class="dot dot-synced"></i><b id="countSynced">0</b> synchronisés</span>
+        <span class="legend-item"><i class="dot dot-error"></i><b id="countErrors">0</b> erreurs temporaires</span>
+        <span class="legend-item"><i class="dot dot-unavailable"></i><b id="countUnavailable">0</b> indisponibles</span>
+      </div>
     </section>
 
-    <section class="panel library-panel" aria-label="Jeux de la bibliothèque">
-      <div class="toolbar">
-        <label class="search"><span class="sr-only">Rechercher</span><input id="searchInput" type="search" placeholder="Rechercher un jeu…"></label>
-        <label><span class="sr-only">Temps de jeu</span><select id="playFilter"><option value="all">Tous les jeux</option><option value="played">Déjà lancés</option><option value="unplayed">Jamais lancés</option></select></label>
-        <label><span class="sr-only">Genre</span><select id="genreFilter"><option value="all">Tous les genres enrichis</option></select></label>
-        <label><span class="sr-only">Tri</span><select id="sortSelect"><option value="name-asc">Nom A → Z</option><option value="name-desc">Nom Z → A</option><option value="time-desc">Temps décroissant</option><option value="time-asc">Temps croissant</option></select></label>
+    <section class="panel library-panel" aria-labelledby="libraryTitle">
+      <h2 id="libraryTitle" class="sr-only">Jeux de la bibliothèque</h2>
+      <div class="filters">
+        <label class="search-field">
+          <span class="sr-only">Rechercher un jeu</span>
+          <input id="searchInput" type="search" placeholder="Rechercher un jeu…">
+        </label>
+        <label><span class="sr-only">État de lecture</span><select id="playFilter"><option value="all">Tous les jeux</option><option value="unplayed">Jamais lancés</option><option value="played">Déjà lancés</option></select></label>
+        <label><span class="sr-only">État des métadonnées</span><select id="statusFilter"><option value="all">Tous les états</option><option value="pending">En attente</option><option value="syncing">En cours</option><option value="synced">Synchronisés</option><option value="temporary_error">Erreur temporaire</option><option value="unavailable">Indisponibles</option></select></label>
+        <label><span class="sr-only">Genre</span><select id="genreFilter"><option value="all">Tous les genres</option></select></label>
+        <label><span class="sr-only">Tri</span><select id="sortSelect"><option value="name-asc">Nom A → Z</option><option value="name-desc">Nom Z → A</option><option value="time-desc">Temps décroissant</option><option value="time-asc">Temps croissant</option><option value="recent-desc">Joué récemment</option></select></label>
         <label><span class="sr-only">Affichage</span><select id="viewSelect"><option value="grid">Jaquettes</option><option value="list">Liste</option></select></label>
       </div>
 
-      <div id="emptyState" class="empty-state">
+      <div id="emptyState" class="empty-state" hidden>
         <span aria-hidden="true">📚</span>
         <strong id="emptyTitle">La bibliothèque est vide</strong>
-        <p id="emptyText">Importe ton export Steam pour afficher les jeux.</p>
+        <p id="emptyText">Synchronise un profil Steam public pour afficher ses jeux.</p>
       </div>
-
-      <div id="gameGrid" class="game-grid" hidden></div>
-      <nav id="pagination" class="pagination" aria-label="Pagination" hidden>
+      <div id="gameGrid" class="game-grid" aria-live="polite"></div>
+      <div id="pagination" class="pagination" hidden>
         <button id="previousPage" class="button button-secondary" type="button">Précédent</button>
-        <span id="pageLabel">Page 1 sur 1</span>
+        <span id="pageInfo">Page 1</span>
         <button id="nextPage" class="button button-secondary" type="button">Suivant</button>
-      </nav>
+      </div>
     </section>
   </main>
 
-  <script src="/app.js" defer></script>
+  <dialog id="resetDialog" class="reset-dialog">
+    <form method="dialog" id="resetForm">
+      <div class="dialog-heading">
+        <h2>Réinitialiser Backlog</h2>
+        <button class="icon-button" value="cancel" aria-label="Fermer">×</button>
+      </div>
+      <p>Une sauvegarde SQLite est créée avant chaque opération.</p>
+      <label class="field">
+        <span>Données à réinitialiser</span>
+        <select id="resetScope">
+          <option value="metadata">Métadonnées uniquement</option>
+          <option value="library">Bibliothèque uniquement</option>
+          <option value="all">Toutes les données applicatives</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Saisis <b>REINITIALISER</b> pour confirmer</span>
+        <input id="resetConfirmation" autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button class="button button-secondary" value="cancel">Annuler</button>
+        <button id="confirmResetButton" class="button button-danger" type="button">Confirmer la réinitialisation</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
