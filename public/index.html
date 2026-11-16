@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Backlog v0.4 — bibliothèque Steam locale et test d’enrichissement des genres.">
+  <title>Backlog v0.4 — Bibliothèque Steam</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="brand-line">
+        <span class="brand-icon" aria-hidden="true">🎮</span>
+        <h1>Backlog <span class="version">v0.4</span></h1>
+      </div>
+      <p>Ta bibliothèque Steam, servie depuis ton conteneur et enrichie progressivement.</p>
+    </header>
+
+    <section class="panel import-panel" aria-labelledby="import-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Bibliothèque locale</p>
+          <h2 id="import-title">Importer l’export Steam</h2>
+        </div>
+        <span class="status-chip" id="server-status">Même origine</span>
+      </div>
+
+      <div class="button-row">
+        <label class="button primary" for="file-input">Importer response.txt / JSON</label>
+        <input id="file-input" type="file" accept=".txt,.json,application/json,text/plain">
+        <button class="button secondary" id="clear-button" type="button" disabled>Effacer la session</button>
+      </div>
+
+      <p class="status-message" id="import-status" role="status" aria-live="polite">
+        Sélectionne le fichier JSON renvoyé par Steam pour commencer.
+      </p>
+      <p class="privacy-note">
+        Le fichier reste dans ce navigateur. Il n’est ni envoyé au serveur, ni sauvegardé entre les sessions. N’importe pas de fichier contenant ta clé API.
+      </p>
+    </section>
+
+    <section class="stats" aria-label="Statistiques de la bibliothèque">
+      <article class="stat-card"><span>Jeux importés</span><strong id="stat-total">—</strong></article>
+      <article class="stat-card"><span>Jamais lancés</span><strong id="stat-unplayed">—</strong></article>
+      <article class="stat-card"><span>Heures enregistrées</span><strong id="stat-hours">—</strong></article>
+      <article class="stat-card"><span>Résultats</span><strong id="stat-results">—</strong></article>
+    </section>
+
+    <section class="panel metadata-panel" aria-labelledby="metadata-title">
+      <div class="section-heading metadata-heading">
+        <div>
+          <p class="eyebrow">Nouveau dans v0.4</p>
+          <h2 id="metadata-title">Genres Steam via le proxy local</h2>
+        </div>
+        <span class="status-chip accent">Maximum 10 jeux par lot</span>
+      </div>
+
+      <div class="metadata-actions">
+        <form id="metadata-form" class="metadata-form">
+          <label for="appid-input">Tester un AppID</label>
+          <div class="input-button-group">
+            <input id="appid-input" type="number" min="1" step="1" value="400" inputmode="numeric" aria-describedby="metadata-help">
+            <button class="button secondary" type="submit">Tester</button>
+          </div>
+        </form>
+        <div class="batch-action">
+          <span>Enrichir les premiers résultats visibles</span>
+          <button class="button primary" id="enrich-button" type="button" disabled>Enrichir jusqu’à 10 jeux</button>
+        </div>
+      </div>
+      <p id="metadata-help" class="privacy-note">
+        Les requêtes passent par <code>/api/steam/:appid</code>. Aucun appel de masse n’est lancé automatiquement.
+      </p>
+      <pre id="metadata-output" class="metadata-output" aria-live="polite">En attente d’un test.</pre>
+    </section>
+
+    <section class="panel catalogue-panel" aria-labelledby="catalogue-title">
+      <h2 id="catalogue-title" class="visually-hidden">Catalogue de jeux</h2>
+      <div class="toolbar">
+        <label class="search-field">
+          <span class="visually-hidden">Rechercher un jeu</span>
+          <input id="search-input" type="search" placeholder="Rechercher un jeu…" autocomplete="off" disabled>
+        </label>
+        <label>
+          <span class="visually-hidden">Filtrer par statut</span>
+          <select id="status-filter" disabled>
+            <option value="all">Tous les jeux</option>
+            <option value="unplayed">Jamais lancés (0 min)</option>
+            <option value="played">Déjà lancés</option>
+          </select>
+        </label>
+        <label>
+          <span class="visually-hidden">Filtrer par genre</span>
+          <select id="genre-filter" disabled>
+            <option value="all">Tous les genres enrichis</option>
+          </select>
+        </label>
+        <label>
+          <span class="visually-hidden">Trier les jeux</span>
+          <select id="sort-select" disabled>
+            <option value="name-asc">Nom A → Z</option>
+            <option value="name-desc">Nom Z → A</option>
+            <option value="time-desc">Temps décroissant</option>
+            <option value="time-asc">Temps croissant</option>
+            <option value="appid-asc">AppID croissant</option>
+          </select>
+        </label>
+        <label>
+          <span class="visually-hidden">Mode d’affichage</span>
+          <select id="view-select" disabled>
+            <option value="grid">Jaquettes</option>
+            <option value="list">Liste</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="empty-state" class="empty-state">
+        <span aria-hidden="true">📚</span>
+        <strong>La bibliothèque est vide</strong>
+        <p>Importe ton export Steam pour afficher les jeux.</p>
+      </div>
+
+      <div id="catalogue" class="catalogue grid" aria-live="polite"></div>
+
+      <nav class="pagination" aria-label="Pagination" hidden>
+        <button class="button secondary" id="previous-page" type="button">Précédent</button>
+        <span id="page-label">Page 1 sur 1</span>
+        <button class="button secondary" id="next-page" type="button">Suivant</button>
+      </nav>
+    </section>
+
+    <footer>
+      <span>Backlog v0.4.0</span>
+      <span>•</span>
+      <span>Prototype local — aucune authentification intégrée</span>
+    </footer>
+  </main>
+</body>
+</html>

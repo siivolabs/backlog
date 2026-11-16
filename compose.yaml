@@ -1,13 +1,29 @@
 services:
-  backlog-proxy-test:
-    build: .
-    ports:
-      - "127.0.0.1:3087:3000"
+  backlog:
+    image: ghcr.io/siivolabs/backlog:dev
+    container_name: backlog-test
+
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+
+    networks:
+      - npm_network
+
     read_only: true
+
     security_opt:
       - no-new-privileges:true
+
     cap_drop:
       - ALL
+
     tmpfs:
-      - /tmp
+      - /tmp:rw,noexec,nosuid,size=16m
+
     restart: "no"
+
+networks:
+  npm_network:
+    external: true
+    name: npm_default

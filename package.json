@@ -1,0 +1,14 @@
+{
+  "name": "@siivolabs/backlog",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Self-hosted Steam library and recommendation prototype",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
