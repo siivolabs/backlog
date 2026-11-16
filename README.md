@@ -1,4 +1,4 @@
-# Backlog v0.7.1
+# Backlog v0.8.0 POC
 
 Backlog V0.7.1 est un correctif ciblé de migration. Il conserve sans changement l’interface, les recommandations, la classification, les fiches détaillées, les corrections manuelles et l’enrichissement Steam Store + IGDB de la V0.7.0.
 
@@ -92,3 +92,8 @@ La suite couvre notamment :
 - la préservation du cache, des métadonnées, des corrections manuelles et des associations IGDB ;
 - l’absence de jeux terminés encore éligibles à un enrichissement inutile ;
 - toutes les non-régressions V0.7.0.
+
+
+## Sélection du pilote IA V0.8
+
+L'interface permet de rechercher les jeux de la bibliothèque, de les sélectionner manuellement, de visualiser le compteur et de valider explicitement la sélection avant toute future analyse. Le bouton de proposition crée un échantillon diversifié de 50 jeux qui reste modifiable et n'est jamais enregistré ni analysé sans validation. La limite de 50 est un garde-fou du POC uniquement, pas une limite de conception de l'architecture future.

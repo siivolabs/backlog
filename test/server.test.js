@@ -127,7 +127,7 @@ test('health and config do not expose secrets', async (t) => {
   await withServer(t, async ({ baseUrl }) => {
     const health = await api(baseUrl, '/healthz');
     assert.equal(health.response.status, 200);
-    assert.deepEqual(health.body, { status: 'ok', version: '0.7.1' });
+    assert.deepEqual(health.body, { status: 'ok', version: '0.8.0-poc' });
 
     const config = await api(baseUrl, '/api/config');
     assert.equal(config.body.steamApiConfigured, true);
@@ -164,6 +164,78 @@ test('imports a public profile by SteamID64 and replaces the active library', as
     assert.equal(library.body.stats.total, 2);
     assert.equal(library.body.stats.neverPlayed, 1);
     assert.equal(library.body.profile.steamid, '76561198000000000');
+  });
+});
+
+test('AI pilot proposes a modifiable diverse sample and requires explicit confirmation', async (t) => {
+  await withServer(t, async ({ baseUrl }) => {
+    await importProfile(baseUrl);
+
+    const initial = await api(baseUrl, '/api/ai-pilot/selection');
+    assert.equal(initial.response.status, 200);
+    assert.deepEqual(initial.body.appids, []);
+    assert.equal(initial.body.confirmed, false);
+    assert.equal(initial.body.analysisAllowed, false);
+    assert.equal(initial.body.pocLimit, 50);
+    assert.equal(initial.body.temporaryLimit, true);
+
+    const proposal = await api(baseUrl, '/api/ai-pilot/sample?limit=50');
+    assert.equal(proposal.response.status, 200);
+    assert.equal(proposal.body.proposed, true);
+    assert.equal(proposal.body.persisted, false);
+    assert.equal(proposal.body.confirmed, false);
+    assert.deepEqual(new Set(proposal.body.appids), new Set([400, 620]));
+
+    const stillEmpty = await api(baseUrl, '/api/ai-pilot/selection');
+    assert.deepEqual(stillEmpty.body.appids, []);
+    assert.equal(stillEmpty.body.confirmed, false);
+
+    const unauthorized = await api(baseUrl, '/api/ai-pilot/selection/confirm', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ appids: [620] })
+    });
+    assert.equal(unauthorized.response.status, 401);
+
+    const missing = await api(baseUrl, '/api/ai-pilot/selection/confirm', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'secret-admin-token' },
+      body: JSON.stringify({ appids: [999999] })
+    });
+    assert.equal(missing.response.status, 400);
+    assert.equal(missing.body.code, 'ai_selection_game_missing');
+
+    const confirmed = await api(baseUrl, '/api/ai-pilot/selection/confirm', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'secret-admin-token' },
+      body: JSON.stringify({ appids: [620] })
+    });
+    assert.equal(confirmed.response.status, 200);
+    assert.deepEqual(confirmed.body.appids, [620]);
+    assert.equal(confirmed.body.confirmed, true);
+    assert.equal(confirmed.body.analysisAllowed, true);
+    assert.match(confirmed.body.message, /Aucune analyse n’a été lancée/);
+
+    const persisted = await api(baseUrl, '/api/ai-pilot/selection');
+    assert.deepEqual(persisted.body.appids, [620]);
+    assert.equal(persisted.body.confirmed, true);
+    assert.equal(persisted.body.analysisAllowed, true);
+  });
+});
+
+test('AI pilot enforces 50 only as a temporary POC guardrail', async (t) => {
+  await withServer(t, async ({ baseUrl, application }) => {
+    await importProfile(baseUrl);
+    const insert = application.db.prepare(`INSERT INTO games(appid, name, metadata_status, application_type, created_at, updated_at)
+      VALUES (?, ?, 'synced', 'full_game', ?, ?)`);
+    const timestamp = new Date().toISOString();
+    for (let index = 1; index <= 49; index += 1) insert.run(10_000 + index, `Jeu ${index}`, timestamp, timestamp);
+    const appids = application.db.prepare('SELECT appid FROM games ORDER BY appid LIMIT 51').all().map((row) => Number(row.appid));
+    assert.equal(appids.length, 51);
+
+    const rejected = await api(baseUrl, '/api/ai-pilot/selection/confirm', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'secret-admin-token' },
+      body: JSON.stringify({ appids })
+    });
+    assert.equal(rejected.response.status, 400);
+    assert.equal(rejected.body.code, 'ai_poc_limit');
+    assert.match(rejected.body.error, /architecture future/);
   });
 });
 
@@ -301,6 +373,12 @@ test('validated UI keeps icon-only statuses accessible and exposes detail/type c
   assert.match(html, /id="gameDialog"/);
   assert.match(html, /id="appTypeFilter"/);
   assert.match(html, /id="recommendationGrid"/);
+  assert.match(html, /id="aiGameSearch"/);
+  assert.match(html, /id="proposeAiSample"/);
+  assert.match(html, /id="confirmAiSelection"/);
+  assert.match(html, /limite de 50 est uniquement un garde-fou/);
+  assert.match(appSource, /state\.aiSelectionConfirmed = false/);
+  assert.match(appSource, /Aucune analyse ne peut démarrer/);
   assert.match(html, /Métadonnées introuvables/);
 });
 

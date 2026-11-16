@@ -10,7 +10,10 @@ const state = {
   statusPoll: null,
   libraryRefreshTick: 0,
   adminToken: '',
-  selectedAppid: null
+  selectedAppid: null,
+  aiSelection: new Set(),
+  aiSelectionConfirmed: false,
+  aiSelectionConfirmedAt: null
 };
 
 const elements = Object.fromEntries([
@@ -25,7 +28,9 @@ const elements = Object.fromEntries([
   'refreshRecommendations', 'recommendationSummary', 'recommendationGrid', 'gameDialog',
   'detailTitle', 'detailCover', 'detailOrigin', 'detailFacts', 'detailClassification',
   'detailIgdbFuture', 'editDisplayName', 'editApplicationType', 'editGenres', 'editThemes',
-  'editPlatforms', 'saveGameButton', 'restoreSourceButton', 'toast'
+  'editPlatforms', 'saveGameButton', 'restoreSourceButton', 'aiSelectionCount', 'aiGameSearch',
+  'proposeAiSample', 'clearAiSelection', 'confirmAiSelection', 'aiSearchSummary', 'aiGameResults',
+  'aiSelectedGames', 'aiSelectionStatus', 'toast'
 ].map((id) => [id, document.getElementById(id)]));
 
 const statusLabels = {
@@ -129,6 +134,149 @@ async function loadLibrary({ preservePage = true } = {}) {
   renderStats();
   rebuildGenreOptions();
   applyFilters();
+  renderAiSelection();
+}
+
+function aiPilotLimit() {
+  return Number(state.config?.aiPilot?.pocLimit || 50);
+}
+
+function selectedAiGames() {
+  const byId = new Map(state.games.map((game) => [game.appid, game]));
+  return [...state.aiSelection].map((appid) => byId.get(appid)).filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }));
+}
+
+function markAiSelectionChanged() {
+  state.aiSelectionConfirmed = false;
+  state.aiSelectionConfirmedAt = null;
+  renderAiSelection();
+}
+
+function toggleAiGame(appid, checked) {
+  const limit = aiPilotLimit();
+  if (checked && state.aiSelection.size >= limit && !state.aiSelection.has(appid)) {
+    showToast(`Le POC est limité temporairement à ${limit} jeux. Retire un jeu avant d’en ajouter un autre.`, 'error');
+    return;
+  }
+  if (checked) state.aiSelection.add(appid);
+  else state.aiSelection.delete(appid);
+  markAiSelectionChanged();
+}
+
+function createAiGameChoice(game) {
+  const label = document.createElement('label');
+  label.className = 'ai-game-choice';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = state.aiSelection.has(game.appid);
+  checkbox.addEventListener('change', () => toggleAiGame(game.appid, checkbox.checked));
+  const copy = document.createElement('span');
+  const title = document.createElement('strong');
+  title.textContent = game.name;
+  const metadata = document.createElement('small');
+  metadata.textContent = `${applicationTypeLabels[game.application_type] || applicationTypeLabels.unknown} · ${formatPlaytime(game.playtime_forever)} · AppID ${game.appid}`;
+  copy.append(title, metadata);
+  label.append(checkbox, copy);
+  return label;
+}
+
+function renderAiSelection() {
+  if (!elements.aiGameResults || !elements.aiSelectedGames) return;
+  const limit = aiPilotLimit();
+  const count = state.aiSelection.size;
+  elements.aiSelectionCount.textContent = `${count} / ${limit} sélectionné${count > 1 ? 's' : ''}`;
+  elements.aiSelectionCount.className = `pill ${count > limit ? 'pill-danger' : count > 0 ? 'pill-success' : 'pill-neutral'}`;
+  elements.confirmAiSelection.disabled = count < 1 || count > limit || state.aiSelectionConfirmed;
+
+  const query = elements.aiGameSearch.value.trim().toLocaleLowerCase('fr');
+  const matches = state.games.filter((game) => !query || game.name.toLocaleLowerCase('fr').includes(query));
+  matches.sort((a, b) => Number(state.aiSelection.has(b.appid)) - Number(state.aiSelection.has(a.appid))
+    || a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }));
+  const visible = matches.slice(0, 120);
+  elements.aiGameResults.replaceChildren(...visible.map(createAiGameChoice));
+  elements.aiSearchSummary.textContent = matches.length > visible.length
+    ? `${numberFormatter.format(matches.length)} résultat(s), ${visible.length} affichés. Affine la recherche.`
+    : `${numberFormatter.format(matches.length)} résultat(s).`;
+
+  const selected = selectedAiGames();
+  if (!selected.length) {
+    const empty = document.createElement('p');
+    empty.className = 'ai-selection-empty';
+    empty.textContent = 'Aucun jeu sélectionné.';
+    elements.aiSelectedGames.replaceChildren(empty);
+  } else {
+    elements.aiSelectedGames.replaceChildren(...selected.map((game) => {
+      const row = document.createElement('div');
+      row.className = 'ai-selected-row';
+      const name = document.createElement('span');
+      name.textContent = game.name;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'icon-button ai-remove-button';
+      remove.setAttribute('aria-label', `Retirer ${game.name}`);
+      remove.textContent = '×';
+      remove.addEventListener('click', () => toggleAiGame(game.appid, false));
+      row.append(name, remove);
+      return row;
+    }));
+  }
+
+  if (state.aiSelectionConfirmed) {
+    elements.aiSelectionStatus.textContent = `Sélection validée (${count} jeu(x))${state.aiSelectionConfirmedAt ? ` le ${formatDate(state.aiSelectionConfirmedAt)}` : ''}. Elle est prête pour une future analyse, mais aucune analyse n’a été lancée.`;
+    elements.aiSelectionStatus.className = 'help ai-status-confirmed';
+  } else if (count) {
+    elements.aiSelectionStatus.textContent = 'Sélection modifiable non validée. L’analyse reste bloquée jusqu’à la validation explicite.';
+    elements.aiSelectionStatus.className = 'help ai-status-pending';
+  } else {
+    elements.aiSelectionStatus.textContent = 'Aucune sélection validée. L’analyse reste bloquée.';
+    elements.aiSelectionStatus.className = 'help';
+  }
+}
+
+async function loadAiPilotSelection() {
+  const payload = await request('/api/ai-pilot/selection');
+  state.aiSelection = new Set(payload.appids || []);
+  state.aiSelectionConfirmed = Boolean(payload.confirmed);
+  state.aiSelectionConfirmedAt = payload.confirmedAt || null;
+  renderAiSelection();
+}
+
+async function proposeAiSample() {
+  setBusy(elements.proposeAiSample, true, 'Création de la proposition…');
+  try {
+    const payload = await request(`/api/ai-pilot/sample?limit=${aiPilotLimit()}`);
+    state.aiSelection = new Set(payload.appids || []);
+    state.aiSelectionConfirmed = false;
+    state.aiSelectionConfirmedAt = null;
+    renderAiSelection();
+    showToast(`${payload.count} jeu(x) proposé(s). Modifie la liste puis valide-la : rien n’a été imposé ni analysé.`);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setBusy(elements.proposeAiSample, false);
+  }
+}
+
+async function confirmAiSelection() {
+  const appids = [...state.aiSelection];
+  if (!appids.length) return showToast('Sélectionne au moins un jeu.', 'error');
+  setBusy(elements.confirmAiSelection, true, 'Validation…');
+  try {
+    const payload = await request('/api/ai-pilot/selection/confirm', {
+      method: 'POST', admin: true, body: JSON.stringify({ appids })
+    });
+    state.aiSelection = new Set(payload.appids);
+    state.aiSelectionConfirmed = true;
+    state.aiSelectionConfirmedAt = payload.confirmedAt;
+    renderAiSelection();
+    showToast(payload.message);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setBusy(elements.confirmAiSelection, false);
+    renderAiSelection();
+  }
 }
 
 function renderStats() {
@@ -470,6 +618,7 @@ async function synchronizeProfile() {
     });
     showToast(`${result.gameCount.toLocaleString('fr-FR')} jeu(x) synchronisé(s) pour ${result.profileName}.`);
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
+    await loadAiPilotSelection();
     await loadRecommendations();
   } catch (error) {
     showToast(error.message, 'error');
@@ -530,6 +679,7 @@ async function resetData() {
     elements.resetConfirmation.value = '';
     showToast(`Réinitialisation terminée. Sauvegarde : ${payload.backup || 'non applicable'}.`);
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
+    await loadAiPilotSelection();
     await loadRecommendations();
   } catch (error) {
     showToast(error.message, 'error');
@@ -558,6 +708,14 @@ function bindEvents() {
   elements.refreshRecommendations.addEventListener('click', loadRecommendations);
   elements.includePlayedRecommendations.addEventListener('change', loadRecommendations);
   elements.includeTechnicalRecommendations.addEventListener('change', loadRecommendations);
+  elements.aiGameSearch.addEventListener('input', renderAiSelection);
+  elements.proposeAiSample.addEventListener('click', proposeAiSample);
+  elements.clearAiSelection.addEventListener('click', () => {
+    state.aiSelection.clear();
+    markAiSelectionChanged();
+    showToast('Sélection locale effacée. Aucune analyse ne peut démarrer.');
+  });
+  elements.confirmAiSelection.addEventListener('click', confirmAiSelection);
   elements.saveGameButton.addEventListener('click', saveGameCorrection);
   elements.restoreSourceButton.addEventListener('click', restoreSourceValues);
 }
@@ -566,6 +724,7 @@ async function initialize() {
   bindEvents();
   try {
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
+    await loadAiPilotSelection();
     await loadRecommendations();
     state.statusPoll = setInterval(pollStatus, 2000);
   } catch (error) {

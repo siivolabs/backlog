@@ -6,7 +6,9 @@ const http = require('node:http');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const VERSION = '0.7.1';
+const VERSION = '0.8.0-poc';
+// Temporary pilot guardrail only. The future architecture must support arbitrary batch sizes.
+const AI_PILOT_POC_LIMIT = 50;
 const STATUS_VALUES = ['pending', 'syncing', 'synced', 'temporary_error', 'unavailable'];
 const APPLICATION_TYPES = ['full_game', 'demo', 'beta', 'prototype', 'public_test', 'dedicated_server', 'software_tool', 'dlc', 'multiplayer_component', 'unknown'];
 const RECOMMENDATION_ALGORITHM = 'explainable-v1';
@@ -769,6 +771,102 @@ function createApplication(options = {}) {
     return publicGame(row);
   }
 
+  function aiPilotSelectionState() {
+    const available = new Set(db.prepare('SELECT appid FROM games').all().map((row) => Number(row.appid)));
+    const stored = safeJsonParse(settings.get('ai_pilot_selection_appids', '[]'), []);
+    const appids = Array.isArray(stored)
+      ? [...new Set(stored.map(Number).filter((appid) => Number.isInteger(appid) && available.has(appid)))].slice(0, AI_PILOT_POC_LIMIT)
+      : [];
+    const confirmedAt = settings.get('ai_pilot_selection_confirmed_at');
+    return {
+      appids,
+      confirmed: Boolean(confirmedAt && appids.length),
+      confirmedAt: confirmedAt || null,
+      pocLimit: AI_PILOT_POC_LIMIT,
+      temporaryLimit: true,
+      analysisAllowed: Boolean(confirmedAt && appids.length)
+    };
+  }
+
+  function validateAiPilotSelection(value) {
+    if (!Array.isArray(value)) throw new HttpError(400, 'appids doit être une liste.', 'invalid_ai_selection');
+    if (value.length < 1) throw new HttpError(400, 'Sélectionne au moins un jeu avant validation.', 'empty_ai_selection');
+    if (value.length > AI_PILOT_POC_LIMIT) {
+      throw new HttpError(400, `Le POC accepte au maximum ${AI_PILOT_POC_LIMIT} jeux. Cette limite ne s’applique pas à l’architecture future.`, 'ai_poc_limit');
+    }
+    const appids = value.map(Number);
+    if (appids.some((appid) => !Number.isInteger(appid) || appid < 1) || new Set(appids).size !== appids.length) {
+      throw new HttpError(400, 'La sélection contient un AppID invalide ou dupliqué.', 'invalid_ai_selection');
+    }
+    const placeholders = appids.map(() => '?').join(', ');
+    const existing = new Set(db.prepare(`SELECT appid FROM games WHERE appid IN (${placeholders})`).all(...appids).map((row) => Number(row.appid)));
+    const missing = appids.filter((appid) => !existing.has(appid));
+    if (missing.length) throw new HttpError(400, `Jeu(x) absent(s) de la bibliothèque : ${missing.join(', ')}.`, 'ai_selection_game_missing');
+    return appids;
+  }
+
+  function playtimeBucket(minutes) {
+    if (!minutes) return 'never';
+    if (minutes < 120) return 'short';
+    if (minutes < 1200) return 'medium';
+    return 'long';
+  }
+
+  function buildDiversifiedAiSample(limit = AI_PILOT_POC_LIMIT) {
+    const allGames = allPublicGames();
+    const fullGames = allGames.filter((game) => game.application_type === 'full_game');
+    const candidates = fullGames.length >= Math.min(limit, allGames.length) ? fullGames : allGames;
+    const remaining = [...candidates];
+    const selected = [];
+    const target = Math.min(limit, remaining.length);
+    const coverage = {
+      genres: new Set(), themes: new Set(), platforms: new Set(), statuses: new Set(), playtime: new Set()
+    };
+
+    while (selected.length < target) {
+      let bestIndex = 0;
+      let bestScore = -Infinity;
+      for (let index = 0; index < remaining.length; index += 1) {
+        const game = remaining[index];
+        const newGenres = (game.genres || []).filter((value) => !coverage.genres.has(value)).length;
+        const newThemes = (game.themes || []).filter((value) => !coverage.themes.has(value)).length;
+        const newPlatforms = (game.platforms || []).filter((value) => !coverage.platforms.has(value)).length;
+        const bucket = playtimeBucket(game.playtime_forever);
+        const completeness = Math.min(4, (game.genres?.length || 0) + (game.themes?.length || 0) + (game.platforms?.length || 0));
+        const score = newGenres * 8 + newThemes * 6 + newPlatforms * 2
+          + (coverage.statuses.has(game.metadata_status) ? 0 : 4)
+          + (coverage.playtime.has(bucket) ? 0 : 5)
+          + completeness
+          + (game.metadata_status === 'synced' ? 2 : 0)
+          + ((Number(game.appid) * 2654435761 % 997) / 997);
+        if (score > bestScore || (score === bestScore && game.name.localeCompare(remaining[bestIndex].name, 'fr') < 0)) {
+          bestIndex = index;
+          bestScore = score;
+        }
+      }
+      const [game] = remaining.splice(bestIndex, 1);
+      selected.push(game);
+      for (const value of game.genres || []) coverage.genres.add(value);
+      for (const value of game.themes || []) coverage.themes.add(value);
+      for (const value of game.platforms || []) coverage.platforms.add(value);
+      coverage.statuses.add(game.metadata_status);
+      coverage.playtime.add(playtimeBucket(game.playtime_forever));
+    }
+
+    return {
+      proposed: true,
+      persisted: false,
+      confirmed: false,
+      appids: selected.map((game) => game.appid),
+      games: selected,
+      requested: limit,
+      count: selected.length,
+      pocLimit: AI_PILOT_POC_LIMIT,
+      temporaryLimit: true,
+      methodology: 'Échantillon déterministe favorisant la diversité des genres, thèmes, plateformes, états de métadonnées et niveaux de temps de jeu. Il reste modifiable et n’est jamais validé automatiquement.'
+    };
+  }
+
   function affinityProfile(games) {
     const profile = { genres: new Map(), themes: new Map(), platforms: new Map(), playedGames: 0, totalMinutes: 0 };
     for (const game of games) {
@@ -1225,6 +1323,7 @@ function createApplication(options = {}) {
         metadataConcurrency,
         manualIgdbMatchPrepared: true,
         recommendationAlgorithm: RECOMMENDATION_ALGORITHM,
+        aiPilot: { enabled: true, pocLimit: AI_PILOT_POC_LIMIT, temporaryLimit: true, requiresExplicitSelectionConfirmation: true },
         activeSteamId: settings.get('active_steamid'),
         activeProfileName: settings.get('active_profile_name'),
         lastLibrarySyncAt: settings.get('last_library_sync_at'),
@@ -1240,6 +1339,39 @@ function createApplication(options = {}) {
         games,
         stats: { total: games.length, neverPlayed, played: games.length - neverPlayed, technical, totalHours: Math.round((totalMinutes / 60) * 10) / 10 },
         profile: { steamid: settings.get('active_steamid'), name: settings.get('active_profile_name'), lastSyncAt: settings.get('last_library_sync_at') }
+      });
+    }
+    if (req.method === 'GET' && pathname === '/api/ai-pilot/selection') {
+      const selection = aiPilotSelectionState();
+      const gamesById = new Map(allPublicGames().map((game) => [game.appid, game]));
+      return sendJson(res, 200, { ...selection, games: selection.appids.map((appid) => gamesById.get(appid)).filter(Boolean) });
+    }
+    if (req.method === 'GET' && pathname === '/api/ai-pilot/sample') {
+      const requested = url.searchParams.get('limit') == null ? AI_PILOT_POC_LIMIT : Number(url.searchParams.get('limit'));
+      if (!Number.isInteger(requested) || requested < 1 || requested > AI_PILOT_POC_LIMIT) {
+        throw new HttpError(400, `La proposition du POC doit contenir entre 1 et ${AI_PILOT_POC_LIMIT} jeux.`, 'invalid_ai_sample_limit');
+      }
+      return sendJson(res, 200, buildDiversifiedAiSample(requested));
+    }
+    if (req.method === 'POST' && pathname === '/api/ai-pilot/selection/confirm') {
+      requireAdmin(req);
+      const body = await readJson(req);
+      const appids = validateAiPilotSelection(body.appids);
+      const confirmedAt = nowIso();
+      transaction(db, () => {
+        settings.set('ai_pilot_selection_appids', JSON.stringify(appids));
+        settings.set('ai_pilot_selection_confirmed_at', confirmedAt);
+      });
+      const gamesById = new Map(allPublicGames().map((game) => [game.appid, game]));
+      return sendJson(res, 200, {
+        appids,
+        games: appids.map((appid) => gamesById.get(appid)).filter(Boolean),
+        confirmed: true,
+        confirmedAt,
+        analysisAllowed: true,
+        pocLimit: AI_PILOT_POC_LIMIT,
+        temporaryLimit: true,
+        message: 'Sélection validée. Aucune analyse n’a été lancée automatiquement.'
       });
     }
     if (req.method === 'GET' && pathname === '/api/recommendations') {

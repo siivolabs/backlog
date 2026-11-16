@@ -31,3 +31,12 @@
 - Rapprochement IGDB par Steam AppID exact, requêtes groupées et cache SQLite.
 - Steam Store conservé comme source primaire.
 - Enrichissement Steam concurrent et reprise persistante.
+
+## 0.8.0-poc
+
+- Ajoute une interface dédiée de sélection des jeux à analyser par le POC IA.
+- Permet la recherche dans toute la bibliothèque et la sélection manuelle par cases à cocher.
+- Affiche un compteur explicite et bloque l'analyse tant que la sélection n'est pas validée.
+- Propose un échantillon diversifié de 50 jeux, modifiable et jamais confirmé automatiquement.
+- Persiste uniquement une sélection explicitement validée par l'utilisateur.
+- Documente que la limite de 50 est temporaire et propre au POC, sans contrainte sur l'architecture future.

@@ -1,8 +1,8 @@
 {
   "name": "siivolabs-backlog",
-  "version": "0.7.1",
+  "version": "0.8.0-poc",
   "private": true,
-  "description": "Bibliothèque Steam auto-hébergée avec synchronisation et enrichissement progressif",
+  "description": "Bibliothèque Steam auto-hébergée avec synchronisation et enrichissement progressif et sélection contrôlée du POC IA",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
