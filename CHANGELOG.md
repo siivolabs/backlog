@@ -1,15 +1,19 @@
-# Journal des modifications
+# Journal des versions
+
+## 0.6.1 — IGDB secondaire et enrichissement accéléré
+
+- Authentification Twitch Client Credentials exclusivement côté serveur.
+- Rapprochement IGDB prioritaire par Steam AppID via `external_games`.
+- Requêtes IGDB groupées et cache SQLite persistant, y compris pour les absences.
+- Steam Store reste la source primaire dès que sa fiche existe.
+- Bascule IGDB pour une fiche Store absente, sans erreur temporaire artificielle.
+- Attribution explicite de la source dans l’API et les badges existants.
+- Enrichissement Steam concurrent, pause/reprise préservées et ralentissement sur HTTP 429.
+- Migration automatique des anciennes entrées `unavailable` pour les retester avec IGDB.
+- Ajout de `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` et des réglages de performance.
 
 ## 0.6.0 — Imports et enrichissement progressif
 
-- Remplacement de l’import manuel `response.txt` par une synchronisation serveur via `GetOwnedGames`.
-- Prise en charge d’un SteamID64, d’une URL `/profiles/`, d’une URL `/id/` ou d’un nom personnalisé.
-- Clé Steam Web API conservée uniquement dans `STEAM_API_KEY`, jamais renvoyée au navigateur.
-- Protection des mutations par `ADMIN_TOKEN`.
-- Synchronisation atomique d’un profil public, avec conservation des métadonnées des jeux communs.
-- Lancement et suspension manuels de l’enrichissement progressif.
-- Temporisation entre les requêtes, gestion de HTTP 429, erreurs temporaires et reprises.
-- Barre de progression et badge d’état par jeu.
-- Sauvegarde SQLite avant réinitialisation des métadonnées, de la bibliothèque ou de toutes les données.
-- Migration non destructive de la base V0.5.
-- Conservation de l’interface visuelle et correction durable de l’état vide.
+- Synchronisation d’un profil Steam public sans `response.txt`.
+- Enrichissement progressif, statuts persistants et reprise.
+- Réinitialisations avec sauvegarde SQLite.

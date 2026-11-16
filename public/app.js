@@ -31,6 +31,11 @@ const statusLabels = {
   unavailable: '× Indisponible'
 };
 
+const sourceLabels = {
+  steam_store: 'Steam Store',
+  igdb: 'IGDB'
+};
+
 const numberFormatter = new Intl.NumberFormat('fr-FR');
 
 async function request(url, options = {}) {
@@ -90,7 +95,9 @@ async function loadConfig() {
   state.config = config;
   elements.serviceState.textContent = `Backlog v${config.version}`;
   elements.serviceState.className = 'service-state online';
-  elements.apiBadge.textContent = config.steamApiConfigured ? 'Clé API configurée' : 'Clé API absente';
+  elements.apiBadge.textContent = config.steamApiConfigured
+    ? `Steam configuré · IGDB ${config.igdbConfigured ? 'configuré' : 'absent'}`
+    : 'Clé API Steam absente';
   elements.apiBadge.className = `pill ${config.steamApiConfigured ? 'pill-success' : 'pill-danger'}`;
   if (config.activeSteamId && !elements.profileInput.value) elements.profileInput.value = config.activeSteamId;
   elements.syncSummary.textContent = config.activeProfileName
@@ -197,8 +204,10 @@ function createGameCard(game) {
   const badge = document.createElement('span');
   badge.className = 'status-badge';
   badge.dataset.status = game.metadata_status;
+  const source = sourceLabels[game.metadata_source] || null;
   badge.textContent = statusLabels[game.metadata_status] || statusLabels.pending;
-  if (game.metadata_error) badge.title = game.metadata_error;
+  if (game.metadata_status === 'synced' && source) badge.textContent += ` · ${source}`;
+  badge.title = [source ? `Source : ${source}` : null, game.metadata_error].filter(Boolean).join('\n');
   cover.append(image, badge);
 
   const body = document.createElement('div');

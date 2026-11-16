@@ -6,7 +6,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const STATUS_VALUES = ['pending', 'syncing', 'synced', 'temporary_error', 'unavailable'];
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -62,6 +62,9 @@ function initializeDatabase(db) {
       metadata_attempts INTEGER NOT NULL DEFAULT 0,
       metadata_updated_at TEXT,
       next_retry_at TEXT,
+      metadata_source TEXT,
+      metadata_provider_id TEXT,
+      metadata_cover_url TEXT,
       source_steamid TEXT,
       last_seen_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -82,10 +85,23 @@ function initializeDatabase(db) {
       started_at TEXT NOT NULL,
       finished_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS metadata_cache (
+      provider TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      provider_id TEXT,
+      name TEXT,
+      genres TEXT NOT NULL DEFAULT '[]',
+      cover_url TEXT,
+      found INTEGER NOT NULL DEFAULT 0,
+      fetched_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      PRIMARY KEY(provider, external_id)
+    );
   `);
 
   // Migration non destructive depuis V0.5.
   const existing = new Set(db.prepare('PRAGMA table_info(games)').all().map((row) => row.name));
+  const migratingFromPre061 = !existing.has('metadata_source');
   const additions = {
     playtime_forever: 'INTEGER NOT NULL DEFAULT 0',
     playtime_windows_forever: 'INTEGER NOT NULL DEFAULT 0',
@@ -99,6 +115,9 @@ function initializeDatabase(db) {
     metadata_attempts: 'INTEGER NOT NULL DEFAULT 0',
     metadata_updated_at: 'TEXT',
     next_retry_at: 'TEXT',
+    metadata_source: 'TEXT',
+    metadata_provider_id: 'TEXT',
+    metadata_cover_url: 'TEXT',
     source_steamid: 'TEXT',
     last_seen_at: 'TEXT',
     created_at: 'TEXT',
@@ -110,9 +129,18 @@ function initializeDatabase(db) {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_games_metadata_status ON games(metadata_status, next_retry_at);
     CREATE INDEX IF NOT EXISTS idx_games_name ON games(name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_metadata_cache_expiry ON metadata_cache(provider, expires_at);
     UPDATE games SET metadata_status = 'pending' WHERE metadata_status = 'syncing';
     UPDATE games SET genres = '[]' WHERE genres IS NULL OR genres = '';
   `);
+  if (migratingFromPre061) {
+    db.exec(`
+      UPDATE games SET metadata_source = 'steam_store'
+        WHERE metadata_status = 'synced' AND (metadata_source IS NULL OR metadata_source = '');
+      UPDATE games SET metadata_status = 'pending', metadata_error = NULL
+        WHERE metadata_status = 'unavailable' AND (metadata_source IS NULL OR metadata_source = '');
+    `);
+  }
 }
 
 function createSettingsStore(db) {
@@ -152,26 +180,34 @@ function normalizeProfileInput(input) {
 async function fetchJson(fetchImpl, url, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 15000);
+  const provider = String(options.provider || 'Steam');
+  const providerCode = provider.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'upstream';
   try {
     const response = await fetchImpl(url, {
-      headers: { 'user-agent': `SiivoLabs-Backlog/${VERSION}`, accept: 'application/json' },
+      method: options.method || 'GET',
+      headers: {
+        'user-agent': `SiivoLabs-Backlog/${VERSION}`,
+        accept: 'application/json',
+        ...(options.headers || {})
+      },
+      body: options.body,
       signal: controller.signal
     });
     const text = await response.text();
     let data = null;
     if (text) {
       try { data = JSON.parse(text); }
-      catch { throw new HttpError(502, 'Steam a renvoyé une réponse illisible.', 'invalid_upstream_response'); }
+      catch { throw new HttpError(502, `${provider} a renvoyé une réponse illisible.`, `${providerCode}_invalid_response`); }
     }
     if (!response.ok) {
-      const error = new HttpError(response.status === 429 ? 429 : 502, `Steam a répondu HTTP ${response.status}.`, 'upstream_error');
+      const error = new HttpError(response.status === 429 ? 429 : 502, `${provider} a répondu HTTP ${response.status}.`, `${providerCode}_upstream_error`);
       error.upstreamStatus = response.status;
       error.retryAfter = Number(response.headers.get('retry-after')) || null;
       throw error;
     }
     return data;
   } catch (error) {
-    if (error.name === 'AbortError') throw new HttpError(504, "Steam n'a pas répondu à temps.", 'upstream_timeout');
+    if (error.name === 'AbortError') throw new HttpError(504, `${provider} n'a pas répondu à temps.`, `${providerCode}_timeout`);
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -184,7 +220,7 @@ function securityHeaders() {
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-    'Content-Security-Policy': "default-src 'self'; img-src 'self' https://cdn.cloudflare.steamstatic.com https://shared.cloudflare.steamstatic.com data:; connect-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    'Content-Security-Policy': "default-src 'self'; img-src 'self' https://cdn.cloudflare.steamstatic.com https://shared.cloudflare.steamstatic.com https://images.igdb.com data:; connect-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
   };
 }
 
@@ -240,7 +276,15 @@ function createApplication(options = {}) {
   const fetchImpl = options.fetchImpl || global.fetch;
   const steamApiKey = String(env.STEAM_API_KEY || '').trim();
   const adminToken = String(env.ADMIN_TOKEN || '').trim();
-  const metadataDelayMs = Math.max(250, Number(env.METADATA_DELAY_MS) || 1500);
+  const twitchClientId = String(env.TWITCH_CLIENT_ID || '').trim();
+  const twitchClientSecret = String(env.TWITCH_CLIENT_SECRET || '').trim();
+  const igdbConfigured = Boolean(twitchClientId && twitchClientSecret);
+  const configuredDelay = env.STEAM_REQUEST_INTERVAL_MS ?? env.METADATA_DELAY_MS ?? 150;
+  const metadataDelayMs = Number.isFinite(Number(configuredDelay)) ? Math.max(0, Number(configuredDelay)) : 150;
+  const metadataConcurrency = Math.max(1, Math.min(8, Math.trunc(Number(env.STEAM_METADATA_CONCURRENCY)) || 4));
+  const igdbBatchSize = Math.max(1, Math.min(200, Math.trunc(Number(env.IGDB_BATCH_SIZE)) || 100));
+  const igdbCacheTtlHours = Math.max(1, Number(env.IGDB_CACHE_TTL_HOURS) || 720);
+  const igdbMissCacheTtlHours = Math.max(1, Number(env.IGDB_MISS_CACHE_TTL_HOURS) || 24);
   const metadataLanguage = String(env.METADATA_LANGUAGE || 'french');
   const metadataCountry = String(env.METADATA_COUNTRY || 'FR');
   const production = env.NODE_ENV === 'production';
@@ -256,11 +300,167 @@ function createApplication(options = {}) {
     running: false,
     pauseRequested: false,
     currentAppid: null,
+    currentAppids: [],
+    phase: 'idle',
     startedAt: null,
     stoppedAt: null,
     processedThisRun: 0,
+    igdbCachedThisRun: 0,
+    igdbLastError: null,
     lastMessage: 'En attente d’un lancement manuel.'
   };
+
+  const igdbAuth = { accessToken: null, expiresAt: 0 };
+  let nextIgdbRequestAt = 0;
+  const cacheLookup = db.prepare(`SELECT * FROM metadata_cache
+    WHERE provider = ? AND external_id = ? AND expires_at > ?`);
+  const cacheUpsert = db.prepare(`
+    INSERT INTO metadata_cache(provider, external_id, provider_id, name, genres, cover_url, found, fetched_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, external_id) DO UPDATE SET
+      provider_id = excluded.provider_id,
+      name = excluded.name,
+      genres = excluded.genres,
+      cover_url = excluded.cover_url,
+      found = excluded.found,
+      fetched_at = excluded.fetched_at,
+      expires_at = excluded.expires_at
+  `);
+
+  function normalizeIgdbCover(value) {
+    const url = String(value || '').trim();
+    if (!url) return null;
+    const absolute = url.startsWith('//') ? `https:${url}` : url;
+    return absolute.replace('/t_thumb/', '/t_cover_big/').slice(0, 500);
+  }
+
+  function getCachedIgdb(appid) {
+    const row = cacheLookup.get('igdb', String(appid), nowIso());
+    if (!row) return null;
+    return {
+      found: Boolean(row.found),
+      providerId: row.provider_id || null,
+      name: row.name || '',
+      genres: safeJsonParse(row.genres, []),
+      coverUrl: row.cover_url || null
+    };
+  }
+
+  async function getIgdbToken(forceRefresh = false) {
+    if (!igdbConfigured) throw new HttpError(503, 'IGDB n’est pas configuré.', 'igdb_not_configured');
+    if (!forceRefresh && igdbAuth.accessToken && Date.now() < igdbAuth.expiresAt - 60_000) return igdbAuth.accessToken;
+    const url = new URL('https://id.twitch.tv/oauth2/token');
+    url.searchParams.set('client_id', twitchClientId);
+    url.searchParams.set('client_secret', twitchClientSecret);
+    url.searchParams.set('grant_type', 'client_credentials');
+    const payload = await fetchJson(fetchImpl, url, { method: 'POST', provider: 'Twitch OAuth' });
+    if (!payload?.access_token) throw new HttpError(502, 'Twitch OAuth n’a pas fourni de jeton IGDB.', 'igdb_token_missing');
+    igdbAuth.accessToken = String(payload.access_token);
+    igdbAuth.expiresAt = Date.now() + Math.max(60, Number(payload.expires_in) || 3600) * 1000;
+    return igdbAuth.accessToken;
+  }
+
+  async function igdbQuery(endpoint, body, retryAuth = true) {
+    const token = await getIgdbToken();
+    const waitMs = Math.max(0, nextIgdbRequestAt - Date.now());
+    if (waitMs) await sleep(waitMs);
+    nextIgdbRequestAt = Date.now() + 260;
+    try {
+      return await fetchJson(fetchImpl, `https://api.igdb.com/v4/${endpoint}`, {
+        method: 'POST',
+        provider: 'IGDB',
+        timeoutMs: 20_000,
+        headers: {
+          'Client-ID': twitchClientId,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'text/plain'
+        },
+        body
+      });
+    } catch (error) {
+      if (retryAuth && error.upstreamStatus === 401) {
+        igdbAuth.accessToken = null;
+        igdbAuth.expiresAt = 0;
+        await getIgdbToken(true);
+        return igdbQuery(endpoint, body, false);
+      }
+      throw error;
+    }
+  }
+
+  async function resolveIgdbSteamSourceId() {
+    const cached = Number(settings.get('igdb_steam_source_id', 0));
+    if (cached > 0) return cached;
+    const sources = await igdbQuery('external_game_sources', 'fields id,name; where name = "Steam"; limit 10;');
+    const steam = Array.isArray(sources)
+      ? sources.find((source) => String(source.name || '').toLowerCase() === 'steam')
+      : null;
+    if (!steam?.id) return null;
+    settings.set('igdb_steam_source_id', Number(steam.id));
+    return Number(steam.id);
+  }
+
+  function cacheIgdbBatch(appids, records) {
+    const byAppid = new Map();
+    for (const record of Array.isArray(records) ? records : []) {
+      const appid = String(record.uid || '');
+      if (!/^\d+$/.test(appid) || !record.game || typeof record.game !== 'object') continue;
+      if (!byAppid.has(appid)) byAppid.set(appid, record);
+    }
+    const fetchedAt = nowIso();
+    transaction(db, () => {
+      for (const appid of appids) {
+        const record = byAppid.get(String(appid));
+        const game = record?.game;
+        const found = Boolean(game && typeof game === 'object');
+        const genres = found && Array.isArray(game.genres)
+          ? [...new Set(game.genres.map((genre) => String(genre?.name || '').trim()).filter(Boolean))]
+          : [];
+        const expiresAt = new Date(Date.now() + (found ? igdbCacheTtlHours : igdbMissCacheTtlHours) * 3_600_000).toISOString();
+        cacheUpsert.run(
+          'igdb', String(appid), found ? String(game.id || '') : null,
+          found ? String(game.name || '').slice(0, 300) : null,
+          JSON.stringify(genres), found ? normalizeIgdbCover(game.cover?.url) : null,
+          found ? 1 : 0, fetchedAt, expiresAt
+        );
+      }
+    });
+    return byAppid.size;
+  }
+
+  async function fetchIgdbBatch(appids) {
+    const quoted = appids.map((appid) => `"${String(appid)}"`).join(',');
+    let sourceId = null;
+    try { sourceId = await resolveIgdbSteamSourceId(); } catch (error) {
+      if ([401, 403, 429].includes(error.upstreamStatus)) throw error;
+    }
+    const fields = 'fields uid,game.id,game.name,game.genres.name,game.cover.url;';
+    let records;
+    if (sourceId) {
+      try {
+        records = await igdbQuery('external_games', `${fields} where external_game_source = ${sourceId} & uid = (${quoted}); limit ${appids.length};`);
+      } catch (error) {
+        if (error.upstreamStatus !== 400) throw error;
+      }
+    }
+    if (!records) {
+      records = await igdbQuery('external_games', `${fields} where category = 1 & uid = (${quoted}); limit ${appids.length};`);
+    }
+    return cacheIgdbBatch(appids, records);
+  }
+
+  async function prefetchIgdb(rows) {
+    if (!igdbConfigured || !rows.length) return true;
+    const missing = rows
+      .map((row) => Number(row.appid))
+      .filter((appid) => !getCachedIgdb(appid));
+    for (let offset = 0; offset < missing.length && !job.pauseRequested; offset += igdbBatchSize) {
+      const batch = missing.slice(offset, offset + igdbBatchSize);
+      job.lastMessage = `Préchargement IGDB : ${Math.min(offset + batch.length, missing.length)} / ${missing.length}.`;
+      job.igdbCachedThisRun += await fetchIgdbBatch(batch);
+    }
+    return true;
+  }
 
   function requireAdmin(req) {
     if (!adminToken) throw new HttpError(503, 'Administration désactivée : configure ADMIN_TOKEN dans Dockge.', 'admin_not_configured');
@@ -283,7 +483,9 @@ function createApplication(options = {}) {
       metadata_status: STATUS_VALUES.includes(row.metadata_status) ? row.metadata_status : 'pending',
       metadata_error: row.metadata_error || null,
       metadata_updated_at: row.metadata_updated_at || null,
-      header_image: `https://cdn.cloudflare.steamstatic.com/steam/apps/${Number(row.appid)}/header.jpg`
+      metadata_source: row.metadata_source || null,
+      metadata_provider_id: row.metadata_provider_id || null,
+      header_image: row.metadata_cover_url || `https://cdn.cloudflare.steamstatic.com/steam/apps/${Number(row.appid)}/header.jpg`
     };
   }
 
@@ -393,69 +595,149 @@ function createApplication(options = {}) {
     }
   }
 
-  async function enrichOne(row) {
+  function updateFromIgdb(appid, cache, options = {}) {
+    const timestamp = nowIso();
+    const status = options.status || 'synced';
+    db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = ?,
+      metadata_error = ?, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
+      next_retry_at = ?, metadata_source = 'igdb', metadata_provider_id = ?, metadata_cover_url = ?,
+      updated_at = ? WHERE appid = ?`)
+      .run(
+        String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), status,
+        options.error || null, timestamp, options.retryAt || null, cache.providerId,
+        cache.coverUrl, timestamp, appid
+      );
+  }
+
+  function markUnavailable(appid) {
+    const timestamp = nowIso();
+    db.prepare(`UPDATE games SET metadata_status = 'unavailable', metadata_error = ?,
+      metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?, next_retry_at = NULL,
+      metadata_source = NULL, metadata_provider_id = NULL, metadata_cover_url = NULL,
+      updated_at = ? WHERE appid = ?`)
+      .run('Aucune fiche Steam Store ni correspondance IGDB par AppID.', timestamp, timestamp, appid);
+  }
+
+  function markTemporaryError(row, error, cache = null) {
     const appid = Number(row.appid);
-    db.prepare("UPDATE games SET metadata_status = 'syncing', metadata_error = NULL, updated_at = ? WHERE appid = ?").run(nowIso(), appid);
-    job.currentAppid = appid;
+    const attempts = Number(row.metadata_attempts || 0) + 1;
+    const retrySeconds = error.retryAfter || Math.min(3600, 30 * (2 ** Math.min(attempts - 1, 6)));
+    const timestamp = nowIso();
+    const retryAt = new Date(Date.now() + retrySeconds * 1000).toISOString();
+    const message = cache?.found
+      ? `${String(error.message || 'Steam Store temporairement indisponible')} Données IGDB affichées en attendant le réessai Steam.`
+      : String(error.message || 'Erreur temporaire');
+    if (cache?.found) {
+      db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = 'temporary_error',
+        metadata_error = ?, metadata_attempts = ?, metadata_updated_at = ?, next_retry_at = ?,
+        metadata_source = 'igdb', metadata_provider_id = ?, metadata_cover_url = ?, updated_at = ? WHERE appid = ?`)
+        .run(String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), message.slice(0, 500),
+          attempts, timestamp, retryAt, cache.providerId, cache.coverUrl, timestamp, appid);
+    } else {
+      db.prepare(`UPDATE games SET metadata_status = 'temporary_error', metadata_error = ?, metadata_attempts = ?,
+        metadata_updated_at = ?, next_retry_at = ?, updated_at = ? WHERE appid = ?`)
+        .run(message.slice(0, 500), attempts, timestamp, retryAt, timestamp, appid);
+    }
+    return error.upstreamStatus === 429 ? retrySeconds * 1000 : 0;
+  }
+
+  async function enrichOne(row, igdbPrefetchOk) {
+    const appid = Number(row.appid);
     try {
       const url = new URL('https://store.steampowered.com/api/appdetails');
       url.searchParams.set('appids', String(appid));
       url.searchParams.set('l', metadataLanguage);
       url.searchParams.set('cc', metadataCountry);
-      const payload = await fetchJson(fetchImpl, url);
+      const payload = await fetchJson(fetchImpl, url, { provider: 'Steam Store' });
       const entry = payload?.[String(appid)];
       if (!entry?.success || !entry.data) {
-        const timestamp = nowIso();
-        db.prepare(`UPDATE games SET metadata_status = 'unavailable', metadata_error = ?, metadata_attempts = metadata_attempts + 1,
-          metadata_updated_at = ?, next_retry_at = NULL, updated_at = ? WHERE appid = ?`)
-          .run('Métadonnées indisponibles sur le magasin Steam.', timestamp, timestamp, appid);
-        return;
+        const cache = getCachedIgdb(appid);
+        if (cache?.found) updateFromIgdb(appid, cache);
+        else if (igdbConfigured && !igdbPrefetchOk) {
+          markTemporaryError(row, new HttpError(502, 'Fiche Steam absente ; IGDB est temporairement indisponible.', 'igdb_pending'));
+        } else markUnavailable(appid);
+        return 0;
       }
       const genres = Array.isArray(entry.data.genres)
-        ? entry.data.genres.map((genre) => String(genre.description || '').trim()).filter(Boolean)
+        ? [...new Set(entry.data.genres.map((genre) => String(genre.description || '').trim()).filter(Boolean))]
         : [];
       const timestamp = nowIso();
       db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = 'synced',
         metadata_error = NULL, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
-        next_retry_at = NULL, updated_at = ? WHERE appid = ?`)
-        .run(String(entry.data.name || '').slice(0, 300), JSON.stringify(genres), timestamp, timestamp, appid);
+        next_retry_at = NULL, metadata_source = 'steam_store', metadata_provider_id = ?, metadata_cover_url = NULL,
+        updated_at = ? WHERE appid = ?`)
+        .run(String(entry.data.name || '').slice(0, 300), JSON.stringify(genres), timestamp, String(appid), timestamp, appid);
+      return 0;
     } catch (error) {
-      const attempts = Number(row.metadata_attempts || 0) + 1;
-      const retrySeconds = error.retryAfter || Math.min(3600, 30 * (2 ** Math.min(attempts - 1, 6)));
-      const timestamp = nowIso();
-      const retryAt = new Date(Date.now() + retrySeconds * 1000).toISOString();
-      db.prepare(`UPDATE games SET metadata_status = 'temporary_error', metadata_error = ?, metadata_attempts = ?,
-        metadata_updated_at = ?, next_retry_at = ?, updated_at = ? WHERE appid = ?`)
-        .run(String(error.message || 'Erreur temporaire').slice(0, 500), attempts, timestamp, retryAt, timestamp, appid);
+      return markTemporaryError(row, error, getCachedIgdb(appid));
     }
+  }
+
+  function eligibleRows() {
+    return db.prepare(`SELECT appid, metadata_attempts FROM games
+      WHERE metadata_status = 'pending'
+         OR (metadata_status = 'temporary_error' AND (next_retry_at IS NULL OR next_retry_at <= ?))
+      ORDER BY CASE metadata_status WHEN 'pending' THEN 0 ELSE 1 END, metadata_attempts ASC, appid ASC`).all(nowIso());
+  }
+
+  function claimBatch() {
+    return transaction(db, () => {
+      const rows = db.prepare(`SELECT appid, metadata_attempts FROM games
+        WHERE metadata_status = 'pending'
+           OR (metadata_status = 'temporary_error' AND (next_retry_at IS NULL OR next_retry_at <= ?))
+        ORDER BY CASE metadata_status WHEN 'pending' THEN 0 ELSE 1 END, metadata_attempts ASC, appid ASC
+        LIMIT ?`).all(nowIso(), metadataConcurrency);
+      const timestamp = nowIso();
+      const claim = db.prepare("UPDATE games SET metadata_status = 'syncing', metadata_error = NULL, updated_at = ? WHERE appid = ?");
+      for (const row of rows) claim.run(timestamp, Number(row.appid));
+      return rows;
+    });
   }
 
   async function runEnrichment() {
     if (job.running) return;
     job.running = true;
     job.pauseRequested = false;
+    job.phase = 'igdb';
     job.startedAt = nowIso();
     job.stoppedAt = null;
     job.processedThisRun = 0;
-    job.lastMessage = 'Enrichissement en cours.';
+    job.igdbCachedThisRun = 0;
+    job.igdbLastError = null;
+    let igdbPrefetchOk = !igdbConfigured;
     try {
+      const rows = eligibleRows();
+      if (igdbConfigured && rows.length) {
+        try {
+          await prefetchIgdb(rows);
+          igdbPrefetchOk = true;
+        } catch (error) {
+          job.igdbLastError = String(error.message || 'IGDB indisponible').slice(0, 300);
+          job.lastMessage = 'IGDB est temporairement indisponible ; poursuite avec Steam Store.';
+        }
+      }
+      job.phase = 'steam';
       while (!job.pauseRequested) {
-        const row = db.prepare(`SELECT appid, metadata_attempts FROM games
-          WHERE metadata_status = 'pending'
-             OR (metadata_status = 'temporary_error' AND (next_retry_at IS NULL OR next_retry_at <= ?))
-          ORDER BY CASE metadata_status WHEN 'pending' THEN 0 ELSE 1 END, metadata_attempts ASC, appid ASC LIMIT 1`).get(nowIso());
-        if (!row) {
+        const rowsToProcess = claimBatch();
+        if (!rowsToProcess.length) {
           job.lastMessage = 'Aucun jeu éligible à enrichir pour le moment.';
           break;
         }
-        await enrichOne(row);
-        job.processedThisRun += 1;
+        job.currentAppids = rowsToProcess.map((row) => Number(row.appid));
+        job.currentAppid = job.currentAppids[0] || null;
+        job.lastMessage = `Enrichissement Steam Store (${rowsToProcess.length} requête(s) en parallèle).`;
+        const throttles = await Promise.all(rowsToProcess.map((row) => enrichOne(row, igdbPrefetchOk)));
+        job.processedThisRun += rowsToProcess.length;
         job.currentAppid = null;
-        if (!job.pauseRequested) await sleep(metadataDelayMs);
+        job.currentAppids = [];
+        const adaptiveDelay = Math.max(metadataDelayMs, ...throttles);
+        if (!job.pauseRequested && adaptiveDelay > 0) await sleep(adaptiveDelay);
       }
       if (job.pauseRequested) job.lastMessage = 'Enrichissement suspendu.';
     } finally {
       job.currentAppid = null;
+      job.currentAppids = [];
+      job.phase = 'idle';
       job.running = false;
       job.stoppedAt = nowIso();
     }
@@ -479,7 +761,9 @@ function createApplication(options = {}) {
       return sendJson(res, 200, {
         version: VERSION,
         steamApiConfigured: Boolean(steamApiKey),
+        igdbConfigured,
         adminConfigured: Boolean(adminToken),
+        metadataConcurrency,
         activeSteamId: settings.get('active_steamid'),
         activeProfileName: settings.get('active_profile_name'),
         lastLibrarySyncAt: settings.get('last_library_sync_at'),
@@ -536,13 +820,16 @@ function createApplication(options = {}) {
       let affected = 0;
       if (scope === 'metadata') {
         affected = Number(db.prepare(`UPDATE games SET genres = '[]', metadata_status = 'pending', metadata_error = NULL,
-          metadata_attempts = 0, metadata_updated_at = NULL, next_retry_at = NULL, updated_at = ?`).run(nowIso()).changes);
+          metadata_attempts = 0, metadata_updated_at = NULL, next_retry_at = NULL, metadata_source = NULL,
+          metadata_provider_id = NULL, metadata_cover_url = NULL, updated_at = ?`).run(nowIso()).changes);
+        db.prepare('DELETE FROM metadata_cache').run();
       } else if (scope === 'library') {
         affected = Number(db.prepare('DELETE FROM games').run().changes);
         for (const key of ['active_steamid', 'active_profile_name', 'last_library_sync_at', 'last_library_sync_count']) settings.remove(key);
       } else {
         affected = transaction(db, () => {
           const count = Number(db.prepare('DELETE FROM games').run().changes);
+          db.prepare('DELETE FROM metadata_cache').run();
           db.prepare('DELETE FROM sync_runs').run();
           db.prepare('DELETE FROM settings').run();
           return count;
@@ -586,6 +873,7 @@ if (require.main === module) {
   server.listen(port, host, () => {
     console.log(`Backlog v${VERSION} écoute sur ${host}:${port}`);
     console.log(`Steam Web API : ${process.env.STEAM_API_KEY ? 'configurée' : 'non configurée'}`);
+    console.log(`IGDB : ${process.env.TWITCH_CLIENT_ID && process.env.TWITCH_CLIENT_SECRET ? 'configuré' : 'non configuré'}`);
     console.log(`Administration : ${process.env.ADMIN_TOKEN ? 'protégée' : 'désactivée (ADMIN_TOKEN absent)'}`);
   });
   const shutdown = () => {

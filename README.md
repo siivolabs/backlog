@@ -1,128 +1,109 @@
-# Backlog v0.6
+# Backlog v0.6.1
 
-Backlog est une bibliothèque Steam auto-hébergée. La V0.6 se concentre sur les **imports depuis un profil public** et sur l’**enrichissement progressif** des métadonnées.
+Backlog est une bibliothèque Steam auto-hébergée. La V0.6.1 conserve la synchronisation des profils publics, la reprise, les badges et l’interface V0.6, puis ajoute **IGDB comme source secondaire** et accélère l’enrichissement.
 
-## Nouveautés
+## Hiérarchie des sources
 
-- plus d’import de `response.txt` ;
-- synchronisation avec un SteamID64, un nom personnalisé ou une URL de profil Steam ;
-- clé Web API utilisée uniquement côté serveur ;
-- prise en charge de n’importe quel profil dont les **détails de jeux sont publics** ;
-- lancement et suspension manuels de l’enrichissement ;
-- progression globale et badge d’état par jeu ;
-- reprise des jeux en attente après redémarrage ;
-- sauvegarde automatique avant chaque réinitialisation ;
-- migration de la base V0.5 sans perte des jeux ni genres déjà présents.
+1. **Steam Store reste prioritaire.** Si la fiche `appdetails` existe, son nom et ses genres sont conservés, avec la source `Steam Store`.
+2. Avant les requêtes Store, Backlog rapproche les jeux avec IGDB par **Steam AppID exact**, via `external_games` et la source externe Steam.
+3. Les AppID sont envoyés à IGDB par lots (100 par défaut) et les réponses sont conservées dans SQLite.
+4. Si Steam indique explicitement que la fiche est absente, Backlog utilise le résultat IGDB déjà mis en cache.
+5. Si Steam et IGDB ne connaissent pas le jeu, le badge devient `Indisponible`. L’absence d’une fiche Steam n’est jamais transformée, à elle seule, en erreur temporaire.
+6. Si Steam échoue temporairement mais qu’IGDB est disponible, les données IGDB peuvent être affichées avec un état d’erreur temporaire ; le prochain essai garde ainsi la possibilité de remplacer ces données par Steam.
 
-## Configuration requise dans Dockge
+Le badge d’un jeu synchronisé affiche clairement `Steam Store` ou `IGDB`. Les identifiants et secrets Twitch ne sont jamais envoyés au navigateur.
 
-Dans l’éditeur de la stack, renseigner deux variables d’environnement :
+## Accélération
+
+- Préchargement IGDB groupé au lieu d’une requête par jeu.
+- Cache SQLite persistant des résultats et des absences IGDB.
+- Quatre requêtes Steam Store simultanées par défaut, configurables de 1 à 8.
+- Temporisation entre les vagues de requêtes et ralentissement automatique selon `Retry-After` en cas de HTTP 429.
+- Les jeux déjà synchronisés et les entrées IGDB encore valides ne sont pas retéléchargés.
+- Le bouton **Suspendre** attend uniquement les requêtes déjà en vol ; les jeux non commencés restent reprenables.
+
+## Configuration Dockge
+
+Crée une application dans le portail développeur Twitch, de type **Confidential**, puis génère un Client Secret. Ajoute ensuite :
 
 ```yaml
 environment:
   STEAM_API_KEY: ta_cle_web_api_steam
   ADMIN_TOKEN: un_secret_long_et_aleatoire
+  TWITCH_CLIENT_ID: identifiant_client_twitch
+  TWITCH_CLIENT_SECRET: secret_client_twitch
 ```
 
-La clé Steam se crée sur <https://steamcommunity.com/dev/apikey>. `ADMIN_TOKEN` protège les imports, l’enrichissement et les réinitialisations. Aucun des deux secrets n’est renvoyé par `/api/config` ni inscrit dans les journaux.
+Les quatre valeurs restent côté serveur. `/api/config` renvoie uniquement des booléens indiquant si Steam, IGDB et l’administration sont configurés.
 
-Le compose complet fourni conserve le montage :
+### Réglages facultatifs
+
+```yaml
+STEAM_METADATA_CONCURRENCY: 4       # 1 à 8
+STEAM_REQUEST_INTERVAL_MS: 150      # pause entre deux vagues
+IGDB_BATCH_SIZE: 100                # 1 à 200 AppID par requête groupée
+IGDB_CACHE_TTL_HOURS: 720           # 30 jours pour une correspondance
+IGDB_MISS_CACHE_TTL_HOURS: 24       # 24 h pour une absence
+METADATA_LANGUAGE: french
+METADATA_COUNTRY: FR
+```
+
+`METADATA_DELAY_MS` reste accepté comme alias de compatibilité si `STEAM_REQUEST_INTERVAL_MS` n’est pas défini.
+
+Le montage persistant ne change pas :
 
 ```yaml
 volumes:
   - ./data:/data
 ```
 
-Si le conteneur ne peut pas écrire dans `./data`, créer le dossier depuis le répertoire de la stack et l’attribuer à l’UID 1000 :
+Si nécessaire :
 
 ```bash
 mkdir -p data
 sudo chown 1000:1000 data
 ```
 
-## Déploiement
+## Migration depuis V0.6
 
-1. Examiner les fichiers de l’archive.
-2. Remplacer les fichiers du dépôt GitHub par cette version en conservant la branche `main`.
-3. Renseigner `STEAM_API_KEY` et `ADMIN_TOKEN` dans la stack Dockge.
-4. Attendre la reconstruction de `ghcr.io/siivolabs/backlog:dev`.
+1. Suspendre l’enrichissement en cours.
+2. Sauvegarder `data/backlog.sqlite`.
+3. Publier les fichiers V0.6.1 et ajouter les variables Twitch.
+4. Laisser GitHub Actions reconstruire `ghcr.io/siivolabs/backlog:dev`.
 5. Dans Dockge, effectuer **Pull**, puis recréer le conteneur.
-6. Ouvrir `http://backlog.home/`.
-7. Saisir le jeton d’administration, puis synchroniser le profil.
+6. Relancer l’enrichissement.
 
-La première ouverture migre automatiquement la base V0.5. Faire malgré tout une copie de `data/backlog.sqlite` avant le déploiement est recommandé.
+La migration SQLite est automatique et non destructive :
 
-## Synchroniser un profil public
+- les jeux `syncing` repassent à `pending` ;
+- les jeux déjà `synced` en V0.6 sont attribués à `Steam Store` ;
+- les anciens jeux `unavailable` repassent à `pending` afin qu’IGDB puisse les examiner ;
+- une table `metadata_cache` conserve les correspondances IGDB et leur expiration.
 
-Sont acceptés :
-
-```text
-7656119xxxxxxxxxx
-mon-nom-personnalise
-https://steamcommunity.com/profiles/7656119xxxxxxxxxx
-https://steamcommunity.com/id/mon-nom-personnalise
-```
-
-La synchronisation remplace la bibliothèque active par celle du profil demandé. Les métadonnées déjà obtenues sont conservées pour les AppID présents dans les deux bibliothèques. Steam ne renvoie la liste que si l’option **Détails des jeux** du profil est publique.
-
-## Enrichissement
-
-L’enrichissement ne démarre jamais tout seul. Le bouton **Lancer** traite les jeux en attente un par un. La temporisation par défaut est de 1 500 ms et peut être réglée avec :
-
-```yaml
-METADATA_DELAY_MS: 1500
-```
-
-Les états persistés sont :
+## États conservés
 
 - `pending` : en attente ;
 - `syncing` : requête en cours ;
-- `synced` : métadonnées récupérées ;
-- `temporary_error` : réessai ultérieur possible ;
-- `unavailable` : aucune fiche disponible.
+- `synced` : métadonnées récupérées depuis Steam Store ou IGDB ;
+- `temporary_error` : un service a échoué temporairement et pourra être retenté ;
+- `unavailable` : aucune fiche Steam Store et aucune correspondance IGDB exacte.
 
 Un état `syncing` interrompu par un redémarrage repasse automatiquement à `pending`.
 
-## Réinitialisations et sauvegardes
+## Réinitialisations
 
-L’interface propose :
+- **Métadonnées uniquement** : remet les jeux en attente et vide le cache fournisseur.
+- **Bibliothèque uniquement** : supprime les jeux, mais conserve le cache IGDB pour un futur réimport.
+- **Toutes les données** : supprime jeux, historique, réglages internes et cache.
 
-- métadonnées uniquement ;
-- bibliothèque uniquement ;
-- toutes les données applicatives.
-
-Une copie cohérente de la base est créée avant l’opération dans :
-
-```text
-data/backups/
-```
-
-La clé API et le jeton restent dans l’environnement du conteneur : une réinitialisation SQLite ne les efface pas.
-
-## Pourquoi SteamDB semble ne pas avoir de limite ?
-
-SteamDB n’effectue pas une requête Store par jeu à chaque visiteur. Le service maintient sa propre base, utilise SteamKit et le flux de changements de Steam, met les résultats en cache et ne rafraîchit que les applications modifiées. SteamDB indique aussi qu’il parse certaines pages Store et qu’il interdit le scraping automatisé de son propre site. Backlog ne doit donc pas utiliser SteamDB comme API.
-
-Le Store Steam ne publie pas de quota contractuel précis pour l’endpoint `appdetails`. Backlog applique par prudence une file séquentielle, une temporisation, la gestion de `429 Retry-After` et des reprises. La Web API officielle, elle, est utilisée pour `GetOwnedGames` avec la clé configurée.
-
-## API principale
-
-| Méthode | Route | Protection | Fonction |
-|---|---|---|---|
-| `GET` | `/healthz` | publique | Santé et version |
-| `GET` | `/api/config` | publique, sans secrets | État de configuration |
-| `GET` | `/api/library` | publique | Bibliothèque persistée |
-| `POST` | `/api/import/steam` | `X-Admin-Token` | Synchroniser un profil |
-| `GET` | `/api/enrichment/status` | publique | Progression |
-| `POST` | `/api/enrichment/start` | `X-Admin-Token` | Démarrer |
-| `POST` | `/api/enrichment/pause` | `X-Admin-Token` | Suspendre |
-| `POST` | `/api/enrichment/retry-errors` | `X-Admin-Token` | Replacer les erreurs en attente |
-| `POST` | `/api/admin/reset` | `X-Admin-Token` + confirmation | Réinitialiser avec sauvegarde |
+Une copie cohérente de SQLite est toujours créée dans `data/backups/` avant l’opération.
 
 ## Tests
 
 ```bash
 npm test
+node --check server.js
+node --check public/app.js
 ```
 
-Les tests n’appellent pas Steam : les réponses amont sont simulées.
+Les tests simulent Steam, Twitch OAuth et IGDB : aucun secret ni appel réseau réel n’est nécessaire.
