@@ -122,6 +122,34 @@
         <p id="aiSelectionStatus" class="help">Aucune sélection validée. L’analyse reste bloquée.</p>
         <p class="help"><strong>Important :</strong> la limite de 50 est uniquement un garde-fou de cette preuve de concept ; elle ne contraint pas l’architecture future.</p>
       </div>
+      <div class="ai-analysis-console" aria-labelledby="aiAnalysisTitle">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Moteur d’analyse local</span>
+            <h3 id="aiAnalysisTitle">Qwen3 + embeddinggemma</h3>
+          </div>
+          <div class="button-row">
+            <button id="testAiConnection" class="button button-secondary" type="button">Tester Ollama</button>
+            <button id="startAiAnalysis" class="button button-primary" type="button" disabled>Lancer l’analyse</button>
+            <button id="pauseAiAnalysis" class="button button-secondary" type="button" disabled>Suspendre</button>
+            <button id="resumeAiAnalysis" class="button button-primary" type="button" disabled>Reprendre</button>
+          </div>
+        </div>
+        <div class="progress-copy">
+          <span id="aiProgressMessage">En attente d’un lancement manuel.</span>
+          <strong id="aiProgressPercent">0 %</strong>
+        </div>
+        <div class="progress-track" role="progressbar" aria-label="Progression de l’analyse IA" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="aiProgressBar" class="progress-bar ai-progress-bar"></div>
+        </div>
+        <div class="status-legend" aria-label="États des profils IA">
+          <span class="legend-item"><i class="dot dot-pending"></i><b id="aiCountQueued">0</b> en attente</span>
+          <span class="legend-item"><i class="dot dot-syncing"></i><b id="aiCountAnalyzing">0</b> en cours</span>
+          <span class="legend-item"><i class="dot dot-synced"></i><b id="aiCountCompleted">0</b> profils prêts</span>
+          <span class="legend-item"><i class="dot dot-error"></i><b id="aiCountErrors">0</b> erreurs</span>
+        </div>
+        <p id="aiEngineDetails" class="help">Configuration du moteur en cours de lecture…</p>
+      </div>
     </section>
 
     <section class="panel recommendation-panel" aria-labelledby="recommendationTitle">
@@ -185,8 +213,24 @@
           <dl id="detailFacts" class="detail-facts"></dl>
           <p id="detailClassification" class="help"></p>
           <p id="detailIgdbFuture" class="help"></p>
+          <div class="steam-actions" aria-label="Actions Steam">
+            <a id="playSteamButton" class="button button-primary" href="#">Jouer</a>
+            <a id="installSteamButton" class="button button-secondary" href="#">Installer</a>
+            <a id="viewSteamButton" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">Voir sur Steam</a>
+          </div>
         </div>
       </div>
+      <section class="ai-similar-section" aria-labelledby="similarGamesTitle">
+        <div class="dialog-heading">
+          <div>
+            <span class="eyebrow">POC IA locale</span>
+            <h3 id="similarGamesTitle">Jeux similaires dans ta bibliothèque</h3>
+          </div>
+          <span id="detailAiProfileStatus" class="pill pill-neutral">Profil non analysé</span>
+        </div>
+        <p id="similarGamesSummary" class="help">Les résultats apparaîtront après l’analyse du lot validé.</p>
+        <div id="similarGamesGrid" class="similar-games-grid" aria-live="polite"></div>
+      </section>
       <fieldset class="manual-editor">
         <legend>Correction manuelle</legend>
         <p class="help">Ces valeurs ont priorité à l’affichage et dans les recommandations. Les valeurs Steam/IGDB d’origine restent conservées.</p>

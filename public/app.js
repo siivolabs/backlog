@@ -13,7 +13,9 @@ const state = {
   selectedAppid: null,
   aiSelection: new Set(),
   aiSelectionConfirmed: false,
-  aiSelectionConfirmedAt: null
+  aiSelectionConfirmedAt: null,
+  aiStatus: null,
+  aiPoll: null
 };
 
 const elements = Object.fromEntries([
@@ -30,7 +32,11 @@ const elements = Object.fromEntries([
   'detailIgdbFuture', 'editDisplayName', 'editApplicationType', 'editGenres', 'editThemes',
   'editPlatforms', 'saveGameButton', 'restoreSourceButton', 'aiSelectionCount', 'aiGameSearch',
   'proposeAiSample', 'clearAiSelection', 'confirmAiSelection', 'aiSearchSummary', 'aiGameResults',
-  'aiSelectedGames', 'aiSelectionStatus', 'toast'
+  'aiSelectedGames', 'aiSelectionStatus', 'testAiConnection', 'startAiAnalysis', 'pauseAiAnalysis',
+  'resumeAiAnalysis', 'aiProgressMessage', 'aiProgressPercent', 'aiProgressBar', 'aiCountQueued',
+  'aiCountAnalyzing', 'aiCountCompleted', 'aiCountErrors', 'aiEngineDetails', 'playSteamButton',
+  'installSteamButton', 'viewSteamButton', 'detailAiProfileStatus', 'similarGamesSummary',
+  'similarGamesGrid', 'toast'
 ].map((id) => [id, document.getElementById(id)]));
 
 const statusLabels = {
@@ -270,12 +276,156 @@ async function confirmAiSelection() {
     state.aiSelectionConfirmed = true;
     state.aiSelectionConfirmedAt = payload.confirmedAt;
     renderAiSelection();
+    await pollAiStatus();
     showToast(payload.message);
   } catch (error) {
     showToast(error.message, 'error');
   } finally {
     setBusy(elements.confirmAiSelection, false);
     renderAiSelection();
+  }
+}
+
+function renderAiStatus(status) {
+  state.aiStatus = status;
+  const counts = status.counts || {};
+  const percent = Number(status.percent || 0);
+  elements.aiProgressMessage.textContent = status.currentName
+    ? `${status.lastMessage || 'Analyse en cours'} (${status.currentName})`
+    : status.lastMessage || 'En attente d’un lancement manuel.';
+  elements.aiProgressPercent.textContent = `${percent.toLocaleString('fr-FR')} %`;
+  elements.aiProgressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  elements.aiProgressBar.parentElement.setAttribute('aria-valuenow', String(percent));
+  elements.aiCountQueued.textContent = numberFormatter.format(counts.queued || 0);
+  elements.aiCountAnalyzing.textContent = numberFormatter.format(counts.analyzing || 0);
+  elements.aiCountCompleted.textContent = numberFormatter.format(counts.completed || 0);
+  elements.aiCountErrors.textContent = numberFormatter.format(counts.error || 0);
+  const paused = status.run?.status === 'paused' || status.run?.status === 'interrupted';
+  const remaining = (counts.queued || 0) + (counts.error || 0) + (counts.analyzing || 0);
+  elements.startAiAnalysis.disabled = status.running || !status.selectionConfirmed || paused || !remaining;
+  elements.pauseAiAnalysis.disabled = !status.running;
+  elements.resumeAiAnalysis.disabled = status.running || !status.selectionConfirmed || !paused || !remaining;
+  elements.testAiConnection.disabled = Boolean(status.running);
+  elements.aiEngineDetails.textContent = [
+    `Analyse : ${status.analysisModel}`,
+    `embeddings : ${status.embeddingModel} (${status.embeddingDimensions} dimensions)`,
+    status.searxngConfigured ? 'SearXNG configuré (utilisé seulement si nécessaire)' : 'SearXNG non configuré : données locales uniquement'
+  ].join(' · ');
+}
+
+async function pollAiStatus() {
+  try {
+    const wasRunning = Boolean(state.aiStatus?.running);
+    const status = await request('/api/ai-pilot/analysis/status');
+    renderAiStatus(status);
+    if (!status.running && wasRunning) await loadLibrary();
+  } catch (error) {
+    elements.aiProgressMessage.textContent = error.message;
+  }
+}
+
+async function testAiConnection() {
+  setBusy(elements.testAiConnection, true, 'Test…');
+  try {
+    const payload = await request('/api/ai-pilot/analysis/test', { method: 'POST', admin: true });
+    const missing = [];
+    if (!payload.analysisModelAvailable) missing.push(payload.analysisModel);
+    if (!payload.embeddingModelAvailable) missing.push(payload.embeddingModel);
+    if (missing.length) showToast(`Ollama répond, mais modèle(s) absent(s) : ${missing.join(', ')}.`, 'error');
+    else showToast(`Ollama répond. ${payload.analysisModel} et ${payload.embeddingModel} sont disponibles.`);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setBusy(elements.testAiConnection, false);
+    await pollAiStatus();
+  }
+}
+
+async function controlAiAnalysis(action) {
+  const button = action === 'pause' ? elements.pauseAiAnalysis : action === 'resume' ? elements.resumeAiAnalysis : elements.startAiAnalysis;
+  setBusy(button, true, action === 'pause' ? 'Suspension…' : action === 'resume' ? 'Reprise…' : 'Lancement…');
+  try {
+    const payload = await request(`/api/ai-pilot/analysis/${action}`, { method: 'POST', admin: true });
+    renderAiStatus(payload.status);
+    showToast(payload.message);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setBusy(button, false);
+    await pollAiStatus();
+  }
+}
+
+function createSimilarGameCard(game) {
+  const article = document.createElement('article');
+  article.className = 'similar-game-card';
+  const heading = document.createElement('div');
+  heading.className = 'recommendation-heading';
+  const title = document.createElement('h4');
+  title.textContent = game.name;
+  const score = document.createElement('strong');
+  score.textContent = `${game.score.toLocaleString('fr-FR')} %`;
+  heading.append(title, score);
+  const subscore = document.createElement('p');
+  subscore.className = 'help';
+  subscore.textContent = `Sémantique ${game.embedding_score.toLocaleString('fr-FR')} % · profil ${game.profile_score.toLocaleString('fr-FR')} %`;
+  const columns = document.createElement('div');
+  columns.className = 'similar-reasons';
+  for (const [label, values, className] of [['Ressemblances', game.similarities, 'similarities'], ['Différences', game.differences, 'differences']]) {
+    const block = document.createElement('div');
+    block.className = className;
+    const headingElement = document.createElement('strong');
+    headingElement.textContent = label;
+    const list = document.createElement('ul');
+    for (const value of values || []) {
+      const item = document.createElement('li');
+      item.textContent = value;
+      list.appendChild(item);
+    }
+    block.append(headingElement, list);
+    columns.appendChild(block);
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'button button-secondary';
+  button.textContent = 'Voir la fiche';
+  button.addEventListener('click', () => openGameDetail(game.appid));
+  article.append(heading, subscore, columns, button);
+  return article;
+}
+
+async function loadAiGameDetail(appid) {
+  elements.detailAiProfileStatus.textContent = 'Chargement du profil…';
+  elements.detailAiProfileStatus.className = 'pill pill-neutral';
+  elements.similarGamesSummary.textContent = 'Recherche des similarités calculées…';
+  elements.similarGamesGrid.replaceChildren();
+  try {
+    const [profilePayload, similarPayload] = await Promise.all([
+      request(`/api/ai-pilot/games/${appid}/profile`),
+      request(`/api/ai-pilot/games/${appid}/similar?limit=10`)
+    ]);
+    const profile = profilePayload.profile;
+    if (!profile) {
+      elements.detailAiProfileStatus.textContent = 'Profil non analysé';
+      elements.similarGamesSummary.textContent = 'Ce jeu ne possède pas encore de profil d’expérience IA.';
+      return;
+    }
+    const labels = { queued: 'En attente', analyzing: 'Analyse en cours', completed: 'Profil prêt', error: 'Erreur' };
+    elements.detailAiProfileStatus.textContent = labels[profile.status] || profile.status;
+    elements.detailAiProfileStatus.className = `pill ${profile.status === 'completed' ? 'pill-success' : profile.status === 'error' ? 'pill-danger' : 'pill-neutral'}`;
+    if (profile.status === 'error') {
+      elements.similarGamesSummary.textContent = profile.error || 'L’analyse de ce jeu a échoué.';
+      return;
+    }
+    const suggestions = similarPayload.suggestions || [];
+    elements.similarGamesSummary.textContent = suggestions.length
+      ? `${suggestions.length} voisin(s) calculé(s) par embeddings et dimensions d’expérience. Le moteur de recommandation historique reste inchangé.`
+      : 'Le profil existe, mais les similarités ne sont pas encore disponibles pour ce lot.';
+    elements.similarGamesGrid.replaceChildren(...suggestions.map(createSimilarGameCard));
+  } catch (error) {
+    elements.detailAiProfileStatus.textContent = 'Indisponible';
+    elements.detailAiProfileStatus.className = 'pill pill-danger';
+    elements.similarGamesSummary.textContent = error.message;
   }
 }
 
@@ -514,12 +664,16 @@ async function openGameDetail(appid) {
     elements.detailIgdbFuture.textContent = game.igdb_manual_match?.status === 'confirmed'
       ? `Rapprochement IGDB manuel confirmé : ${game.igdb_manual_match.igdb_game_id}.`
       : 'Rapprochement IGDB manuel préparé mais inactif : aucune correspondance approximative n’est appliquée automatiquement.';
+    elements.playSteamButton.href = `steam://run/${game.appid}`;
+    elements.installSteamButton.href = `steam://install/${game.appid}`;
+    elements.viewSteamButton.href = `https://store.steampowered.com/app/${game.appid}/`;
     elements.editDisplayName.value = game.name;
     elements.editApplicationType.value = game.application_type;
     elements.editGenres.value = game.genres.join(', ');
     elements.editThemes.value = game.themes.join(', ');
     elements.editPlatforms.value = game.platforms.join(', ');
     if (!elements.gameDialog.open) elements.gameDialog.showModal();
+    void loadAiGameDetail(game.appid);
   } catch (error) {
     showToast(error.message, 'error');
   }
@@ -716,6 +870,10 @@ function bindEvents() {
     showToast('Sélection locale effacée. Aucune analyse ne peut démarrer.');
   });
   elements.confirmAiSelection.addEventListener('click', confirmAiSelection);
+  elements.testAiConnection.addEventListener('click', testAiConnection);
+  elements.startAiAnalysis.addEventListener('click', () => controlAiAnalysis('start'));
+  elements.pauseAiAnalysis.addEventListener('click', () => controlAiAnalysis('pause'));
+  elements.resumeAiAnalysis.addEventListener('click', () => controlAiAnalysis('resume'));
   elements.saveGameButton.addEventListener('click', saveGameCorrection);
   elements.restoreSourceButton.addEventListener('click', restoreSourceValues);
 }
@@ -725,8 +883,10 @@ async function initialize() {
   try {
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
     await loadAiPilotSelection();
+    await pollAiStatus();
     await loadRecommendations();
     state.statusPoll = setInterval(pollStatus, 2000);
+    state.aiPoll = setInterval(pollAiStatus, 2000);
   } catch (error) {
     elements.serviceState.textContent = 'Serveur indisponible';
     elements.serviceState.className = 'service-state offline';

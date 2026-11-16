@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const { createAiEngine } = require('./ai-engine');
 
 const VERSION = '0.8.0-poc';
 // Temporary pilot guardrail only. The future architecture must support arbitrary batch sizes.
@@ -206,6 +207,11 @@ function initializeDatabase(db) {
       metadata_provider_id TEXT,
       igdb_provider_id TEXT,
       metadata_cover_url TEXT,
+      steam_short_description TEXT,
+      steam_about TEXT,
+      steam_categories TEXT NOT NULL DEFAULT '[]',
+      igdb_summary TEXT,
+      igdb_storyline TEXT,
       source_steamid TEXT,
       last_seen_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -236,6 +242,8 @@ function initializeDatabase(db) {
       platforms TEXT NOT NULL DEFAULT '[]',
       game_type TEXT,
       cover_url TEXT,
+      summary TEXT,
+      storyline TEXT,
       found INTEGER NOT NULL DEFAULT 0,
       fetched_at TEXT NOT NULL,
       expires_at TEXT NOT NULL,
@@ -297,6 +305,11 @@ function initializeDatabase(db) {
     metadata_provider_id: 'TEXT',
     igdb_provider_id: 'TEXT',
     metadata_cover_url: 'TEXT',
+    steam_short_description: 'TEXT',
+    steam_about: 'TEXT',
+    steam_categories: "TEXT NOT NULL DEFAULT '[]'",
+    igdb_summary: 'TEXT',
+    igdb_storyline: 'TEXT',
     source_steamid: 'TEXT',
     last_seen_at: 'TEXT',
     created_at: 'TEXT',
@@ -309,7 +322,9 @@ function initializeDatabase(db) {
   const cacheAdditions = {
     themes: "TEXT NOT NULL DEFAULT '[]'",
     platforms: "TEXT NOT NULL DEFAULT '[]'",
-    game_type: 'TEXT'
+    game_type: 'TEXT',
+    summary: 'TEXT',
+    storyline: 'TEXT'
   };
   for (const [column, definition] of Object.entries(cacheAdditions)) {
     if (!cacheColumns.has(column)) db.exec(`ALTER TABLE metadata_cache ADD COLUMN ${column} ${definition}`);
@@ -531,8 +546,8 @@ function createApplication(options = {}) {
   const cacheLookup = db.prepare(`SELECT * FROM metadata_cache
     WHERE provider = ? AND external_id = ? AND expires_at > ?`);
   const cacheUpsert = db.prepare(`
-    INSERT INTO metadata_cache(provider, external_id, provider_id, name, genres, themes, platforms, game_type, cover_url, found, fetched_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO metadata_cache(provider, external_id, provider_id, name, genres, themes, platforms, game_type, cover_url, summary, storyline, found, fetched_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider, external_id) DO UPDATE SET
       provider_id = excluded.provider_id,
       name = excluded.name,
@@ -541,6 +556,8 @@ function createApplication(options = {}) {
       platforms = excluded.platforms,
       game_type = excluded.game_type,
       cover_url = excluded.cover_url,
+      summary = excluded.summary,
+      storyline = excluded.storyline,
       found = excluded.found,
       fetched_at = excluded.fetched_at,
       expires_at = excluded.expires_at
@@ -564,7 +581,9 @@ function createApplication(options = {}) {
       themes: safeJsonParse(row.themes, []),
       platforms: safeJsonParse(row.platforms, []),
       gameType: row.game_type || null,
-      coverUrl: row.cover_url || null
+      coverUrl: row.cover_url || null,
+      summary: row.summary || null,
+      storyline: row.storyline || null
     };
   }
 
@@ -647,13 +666,15 @@ function createApplication(options = {}) {
         const gameType = found
           ? String(game.game_type?.type || game.game_type?.name || game.game_type || game.category || '').trim()
           : '';
+        const summary = found ? String(game.summary || '').trim().slice(0, 12000) : '';
+        const storyline = found ? String(game.storyline || '').trim().slice(0, 12000) : '';
         const expiresAt = new Date(Date.now() + (found ? igdbCacheTtlHours : igdbMissCacheTtlHours) * 3_600_000).toISOString();
         cacheUpsert.run(
           'igdb', String(appid), found ? String(game.id || '') : null,
           found ? String(game.name || '').slice(0, 300) : null,
           JSON.stringify(genres), JSON.stringify(themes), JSON.stringify(platforms), gameType || null,
           found ? normalizeIgdbCover(game.cover?.url) : null,
-          found ? 1 : 0, fetchedAt, expiresAt
+           summary || null, storyline || null, found ? 1 : 0, fetchedAt, expiresAt
         );
       }
     });
@@ -666,8 +687,8 @@ function createApplication(options = {}) {
     try { sourceId = await resolveIgdbSteamSourceId(); } catch (error) {
       if ([401, 403, 429].includes(error.upstreamStatus)) throw error;
     }
-    const modernFields = 'fields uid,game.id,game.name,game.genres.name,game.themes.name,game.platforms.name,game.game_type.type,game.category,game.cover.url;';
-    const legacyFields = 'fields uid,game.id,game.name,game.genres.name,game.themes.name,game.platforms.name,game.category,game.cover.url;';
+    const modernFields = 'fields uid,game.id,game.name,game.summary,game.storyline,game.genres.name,game.themes.name,game.platforms.name,game.game_type.type,game.category,game.cover.url;';
+    const legacyFields = 'fields uid,game.id,game.name,game.summary,game.storyline,game.genres.name,game.themes.name,game.platforms.name,game.category,game.cover.url;';
     const queryExternalGames = async (filter) => {
       try {
         return await igdbQuery('external_games', `${modernFields} where ${filter}; limit ${appids.length};`);
@@ -1128,14 +1149,14 @@ function createApplication(options = {}) {
       classification_confidence = ?, metadata_status = ?,
       metadata_error = ?, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
       next_retry_at = ?, metadata_source = 'igdb', metadata_sources = '["igdb"]', metadata_provider_id = ?,
-      igdb_provider_id = ?, metadata_cover_url = ?,
+      igdb_provider_id = ?, metadata_cover_url = ?, igdb_summary = ?, igdb_storyline = ?,
       updated_at = ? WHERE appid = ?`)
       .run(
         String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), JSON.stringify(cache.themes || []),
         JSON.stringify(cache.platforms || []), String(cache.gameType || '').slice(0, 100),
         classification.applicationType, classification.source, classification.reason, classification.confidence, status,
         options.error || null, timestamp, options.retryAt || null, cache.providerId,
-        cache.providerId, cache.coverUrl, timestamp, appid
+        cache.providerId, cache.coverUrl, cache.summary, cache.storyline, timestamp, appid
       );
   }
 
@@ -1164,12 +1185,12 @@ function createApplication(options = {}) {
         classification_confidence = ?, metadata_status = 'temporary_error',
         metadata_error = ?, metadata_attempts = ?, metadata_updated_at = ?, next_retry_at = ?,
         metadata_source = 'igdb', metadata_sources = '["igdb"]', metadata_provider_id = ?, igdb_provider_id = ?,
-        metadata_cover_url = ?, updated_at = ? WHERE appid = ?`)
+        metadata_cover_url = ?, igdb_summary = ?, igdb_storyline = ?, updated_at = ? WHERE appid = ?`)
         .run(String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), JSON.stringify(cache.themes || []),
           JSON.stringify(cache.platforms || []), String(cache.gameType || '').slice(0, 100),
           classification.applicationType, classification.source, classification.reason, classification.confidence,
           message.slice(0, 500), attempts, timestamp, retryAt, cache.providerId, cache.providerId,
-          cache.coverUrl, timestamp, appid);
+          cache.coverUrl, cache.summary, cache.storyline, timestamp, appid);
     } else {
       db.prepare(`UPDATE games SET metadata_status = 'temporary_error', metadata_error = ?, metadata_attempts = ?,
         metadata_updated_at = ?, next_retry_at = ?, updated_at = ? WHERE appid = ?`)
@@ -1204,6 +1225,8 @@ function createApplication(options = {}) {
       const platforms = steamPlatforms.length ? steamPlatforms : (cache?.found ? cache.platforms : []);
       const steamType = String(entry.data.type || '').slice(0, 100);
       const categories = Array.isArray(entry.data.categories) ? entry.data.categories.map((category) => category.description) : [];
+      const steamShortDescription = String(entry.data.short_description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 12000);
+      const steamAbout = String(entry.data.about_the_game || entry.data.detailed_description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24000);
       const classification = classifyApplication({
         name: entry.data.name,
         steamType,
@@ -1218,12 +1241,14 @@ function createApplication(options = {}) {
         metadata_error = NULL, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
         next_retry_at = NULL, metadata_source = 'steam_store', metadata_sources = ?, metadata_provider_id = ?,
         igdb_provider_id = ?, metadata_cover_url = NULL,
+        steam_short_description = ?, steam_about = ?, steam_categories = ?, igdb_summary = ?, igdb_storyline = ?,
         updated_at = ? WHERE appid = ?`)
         .run(String(entry.data.name || '').slice(0, 300), JSON.stringify(genres), JSON.stringify(themes), JSON.stringify(platforms),
           steamType, String(cache?.gameType || '').slice(0, 100), classification.applicationType, classification.source,
           classification.reason, classification.confidence, timestamp,
           JSON.stringify(cache?.found ? ['steam_store', 'igdb'] : ['steam_store']), String(appid), cache?.providerId || null,
-          timestamp, appid);
+           steamShortDescription || null, steamAbout || null, JSON.stringify(categories), cache?.summary || null,
+           cache?.storyline || null, timestamp, appid);
       return 0;
     } catch (error) {
       return markTemporaryError(row, error, getCachedIgdb(appid));
@@ -1311,6 +1336,17 @@ function createApplication(options = {}) {
     return path.basename(destination);
   }
 
+  const aiEngine = createAiEngine({
+    db,
+    settings,
+    fetchImpl,
+    env,
+    allPublicGames,
+    gameByAppid,
+    transaction,
+    HttpError
+  });
+
   async function handleApi(req, res, url) {
     const pathname = url.pathname;
     if (req.method === 'GET' && pathname === '/healthz') return sendJson(res, 200, { status: 'ok', version: VERSION });
@@ -1323,7 +1359,17 @@ function createApplication(options = {}) {
         metadataConcurrency,
         manualIgdbMatchPrepared: true,
         recommendationAlgorithm: RECOMMENDATION_ALGORITHM,
-        aiPilot: { enabled: true, pocLimit: AI_PILOT_POC_LIMIT, temporaryLimit: true, requiresExplicitSelectionConfirmation: true },
+        aiPilot: {
+          enabled: true,
+          pocLimit: AI_PILOT_POC_LIMIT,
+          temporaryLimit: true,
+          requiresExplicitSelectionConfirmation: true,
+          analysisModel: aiEngine.config.analysisModel,
+          embeddingModel: aiEngine.config.embeddingModel,
+          embeddingDimensions: aiEngine.config.embeddingDimensions,
+          promptVersion: aiEngine.config.promptVersion,
+          searxngConfigured: aiEngine.config.searxngConfigured
+        },
         activeSteamId: settings.get('active_steamid'),
         activeProfileName: settings.get('active_profile_name'),
         lastLibrarySyncAt: settings.get('last_library_sync_at'),
@@ -1355,6 +1401,7 @@ function createApplication(options = {}) {
     }
     if (req.method === 'POST' && pathname === '/api/ai-pilot/selection/confirm') {
       requireAdmin(req);
+      if (aiEngine.job.running) throw new HttpError(409, 'Suspends l’analyse IA avant de modifier le lot validé.', 'ai_job_running');
       const body = await readJson(req);
       const appids = validateAiPilotSelection(body.appids);
       const confirmedAt = nowIso();
@@ -1373,6 +1420,33 @@ function createApplication(options = {}) {
         temporaryLimit: true,
         message: 'Sélection validée. Aucune analyse n’a été lancée automatiquement.'
       });
+    }
+    if (req.method === 'GET' && pathname === '/api/ai-pilot/analysis/status') {
+      return sendJson(res, 200, aiEngine.statusSnapshot());
+    }
+    if (req.method === 'POST' && pathname === '/api/ai-pilot/analysis/test') {
+      requireAdmin(req);
+      return sendJson(res, 200, await aiEngine.testConnection());
+    }
+    if (req.method === 'POST' && (pathname === '/api/ai-pilot/analysis/start' || pathname === '/api/ai-pilot/analysis/resume')) {
+      requireAdmin(req);
+      if (job.running) throw new HttpError(409, 'Suspends l’enrichissement des métadonnées avant de lancer l’analyse IA.', 'metadata_job_running');
+      return sendJson(res, 202, { message: pathname.endsWith('/resume') ? 'Reprise de l’analyse IA demandée.' : 'Analyse IA lancée.', status: aiEngine.start() });
+    }
+    if (req.method === 'POST' && pathname === '/api/ai-pilot/analysis/pause') {
+      requireAdmin(req);
+      return sendJson(res, 202, { message: 'Suspension demandée après le jeu en cours.', status: aiEngine.pause() });
+    }
+    const aiProfileRoute = pathname.match(/^\/api\/ai-pilot\/games\/(\d{1,10})\/profile$/);
+    if (req.method === 'GET' && aiProfileRoute) {
+      return sendJson(res, 200, { profile: aiEngine.profileFor(aiProfileRoute[1]) });
+    }
+    const aiSimilarRoute = pathname.match(/^\/api\/ai-pilot\/games\/(\d{1,10})\/similar$/);
+    if (req.method === 'GET' && aiSimilarRoute) {
+      const limitValue = url.searchParams.get('limit');
+      const limit = limitValue == null ? 10 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new HttpError(400, 'La limite doit être comprise entre 1 et 20.', 'invalid_limit');
+      return sendJson(res, 200, { suggestions: aiEngine.similarGames(aiSimilarRoute[1], limit) });
     }
     if (req.method === 'GET' && pathname === '/api/recommendations') {
       const limitValue = url.searchParams.get('limit');
@@ -1393,11 +1467,13 @@ function createApplication(options = {}) {
     const manualRoute = pathname.match(/^\/api\/games\/(\d{1,10})\/manual$/);
     if (req.method === 'PATCH' && manualRoute) {
       requireAdmin(req);
+      if (aiEngine.job.running) throw new HttpError(409, 'Suspends l’analyse IA avant de corriger les données sources.', 'ai_job_running');
       const patch = validateManualOverride(await readJson(req));
       return sendJson(res, 200, { game: saveManualOverride(manualRoute[1], patch) });
     }
     if (req.method === 'DELETE' && manualRoute) {
       requireAdmin(req);
+      if (aiEngine.job.running) throw new HttpError(409, 'Suspends l’analyse IA avant de restaurer les données sources.', 'ai_job_running');
       gameByAppid(manualRoute[1]);
       db.prepare('DELETE FROM game_manual_overrides WHERE appid = ?').run(Number(manualRoute[1]));
       return sendJson(res, 200, { game: gameByAppid(manualRoute[1]) });
@@ -1410,12 +1486,14 @@ function createApplication(options = {}) {
     }
     if (req.method === 'POST' && pathname === '/api/import/steam') {
       requireAdmin(req);
+      if (aiEngine.job.running) throw new HttpError(409, 'Suspends l’analyse IA avant de synchroniser la bibliothèque.', 'ai_job_running');
       const body = await readJson(req);
       return sendJson(res, 200, await importPublicProfile(body.profile));
     }
     if (req.method === 'POST' && pathname === '/api/enrichment/start') {
       requireAdmin(req);
       if (job.running) throw new HttpError(409, 'Un enrichissement est déjà en cours.', 'job_running');
+      if (aiEngine.job.running) throw new HttpError(409, 'Suspends l’analyse IA avant d’enrichir les métadonnées.', 'ai_job_running');
       void runEnrichment();
       return sendJson(res, 202, { message: 'Enrichissement lancé.', status: statusSnapshot() });
     }
@@ -1438,6 +1516,7 @@ function createApplication(options = {}) {
       if (!['metadata', 'library', 'all'].includes(scope)) throw new HttpError(400, 'Portée de réinitialisation invalide.', 'invalid_reset_scope');
       if (String(body.confirmation || '') !== 'REINITIALISER') throw new HttpError(400, 'Confirmation incorrecte.', 'confirmation_required');
       if (job.running) throw new HttpError(409, 'Suspends l’enrichissement avant de réinitialiser les données.', 'job_running');
+      if (aiEngine.job.running) throw new HttpError(409, 'Suspends l’analyse IA avant de réinitialiser les données.', 'ai_job_running');
       const backup = createBackup(scope);
       let affected = 0;
       if (scope === 'metadata') {
@@ -1446,7 +1525,8 @@ function createApplication(options = {}) {
           classification_reason = 'Entrée de bibliothèque Steam sans signal contraire.', classification_confidence = 'low',
           metadata_status = 'pending', metadata_error = NULL, metadata_attempts = 0, metadata_updated_at = NULL,
           next_retry_at = NULL, metadata_source = NULL, metadata_sources = '[]', metadata_provider_id = NULL,
-          igdb_provider_id = NULL, metadata_cover_url = NULL, updated_at = ?`).run(nowIso()).changes);
+          igdb_provider_id = NULL, metadata_cover_url = NULL, steam_short_description = NULL, steam_about = NULL,
+          steam_categories = '[]', igdb_summary = NULL, igdb_storyline = NULL, updated_at = ?`).run(nowIso()).changes);
         db.prepare('DELETE FROM metadata_cache').run();
         db.prepare('DELETE FROM recommendation_cache').run();
       } else if (scope === 'library') {
@@ -1488,7 +1568,8 @@ function createApplication(options = {}) {
     db,
     settings,
     job,
-    close() { job.pauseRequested = true; db.close(); }
+    aiEngine,
+    close() { job.pauseRequested = true; aiEngine.job.pauseRequested = true; db.close(); }
   };
 }
 
@@ -1501,6 +1582,8 @@ if (require.main === module) {
     console.log(`Backlog v${VERSION} écoute sur ${host}:${port}`);
     console.log(`Steam Web API : ${process.env.STEAM_API_KEY ? 'configurée' : 'non configurée'}`);
     console.log(`IGDB : ${process.env.TWITCH_CLIENT_ID && process.env.TWITCH_CLIENT_SECRET ? 'configuré' : 'non configuré'}`);
+    console.log(`Ollama : ${application.aiEngine.config.ollamaBaseUrl} (${application.aiEngine.config.analysisModel} + ${application.aiEngine.config.embeddingModel})`);
+    console.log(`SearXNG : ${application.aiEngine.config.searxngConfigured ? 'configuré' : 'optionnel, non configuré'}`);
     console.log(`Administration : ${process.env.ADMIN_TOKEN ? 'protégée' : 'désactivée (ADMIN_TOKEN absent)'}`);
   });
   const shutdown = () => {

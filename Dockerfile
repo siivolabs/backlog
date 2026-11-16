@@ -3,7 +3,7 @@ ENV NODE_ENV=production \
     PORT=3000 \
     DB_PATH=/data/backlog.sqlite
 WORKDIR /app
-COPY package.json package-lock.json server.js ./
+COPY package.json package-lock.json server.js ai-engine.js ./
 COPY public ./public
 RUN mkdir -p /data \
     && chown -R node:node /app /data

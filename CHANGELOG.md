@@ -40,3 +40,18 @@
 - Propose un échantillon diversifié de 50 jeux, modifiable et jamais confirmé automatiquement.
 - Persiste uniquement une sélection explicitement validée par l'utilisateur.
 - Documente que la limite de 50 est temporaire et propre au POC, sans contrainte sur l'architecture future.
+
+
+### Moteur d’analyse effectif
+
+- Connexion configurable à Ollama, par défaut `http://192.168.1.77:11434`.
+- Profils d’expérience structurés avec `qwen3:32b`, température 0, graine 42 et prompt versionné.
+- Dossiers local-first avec descriptions Steam, résumé/synopsis IGDB et recours optionnel à SearXNG seulement si nécessaire.
+- Les URL SearXNG sont conservées pour la traçabilité mais ne sont jamais envoyées à Qwen.
+- Embeddings `embeddinggemma` contrôlés à 768 dimensions et stockés en BLOB SQLite.
+- Tables dédiées aux exécutions, profils, sources, vecteurs et similarités ; moteur historique préservé.
+- Similarités hybrides, ressemblances et différences dans les fiches.
+- Boutons Steam Jouer, Installer et Voir sur Steam.
+- Lancement, suspension et reprise manuels avec progression et récupération après interruption.
+- Verrous empêchant la synchronisation, l’enrichissement ou la modification des sources pendant une analyse IA.
+- Tests d’intégration Ollama/SearXNG simulés, contrôle des dimensions et vérification qu’aucune URL documentaire n’est transmise au modèle.

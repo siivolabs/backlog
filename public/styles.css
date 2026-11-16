@@ -213,3 +213,29 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .ai-list-heading { align-items: flex-start; flex-direction: column; }
   .ai-list-heading .help { text-align: left; }
 }
+
+
+/* V0.8 POC — AI analysis console, Steam actions and similarity cards */
+.ai-analysis-console { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(111, 145, 180, .32); }
+.ai-analysis-console h3 { margin: 2px 0 0; font-size: 1.05rem; }
+.ai-progress-bar { background: linear-gradient(90deg, #9575ff, #55d8bf); }
+.steam-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.steam-actions .button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.ai-similar-section { margin-top: 22px; padding: 17px; border: 1px solid var(--border); border-radius: 11px; background: rgba(13, 32, 55, .55); }
+.ai-similar-section h3 { margin: 2px 0 0; font-size: 1rem; }
+.similar-games-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.similar-game-card { display: flex; flex-direction: column; min-width: 0; padding: 13px; border: 1px solid #3b5878; border-radius: 10px; background: rgba(23, 42, 68, .78); }
+.similar-game-card h4 { margin: 0; font-size: .9rem; }
+.similar-game-card .recommendation-heading strong { color: var(--success); }
+.similar-reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1; margin: 10px 0 12px; }
+.similar-reasons > div { min-width: 0; padding: 9px; border-radius: 8px; background: rgba(9, 26, 45, .56); }
+.similar-reasons strong { font-size: .74rem; color: #cce1f8; }
+.similar-reasons ul { margin: 7px 0 0; padding-left: 16px; color: var(--muted); font-size: .72rem; line-height: 1.4; }
+.similar-reasons .similarities { border-left: 3px solid var(--success); }
+.similar-reasons .differences { border-left: 3px solid var(--warning); }
+.similar-game-card .button { align-self: flex-start; }
+
+@media (max-width: 760px) {
+  .similar-games-grid, .similar-reasons { grid-template-columns: 1fr; }
+  .steam-actions .button { flex: 1 1 100%; }
+}

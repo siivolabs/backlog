@@ -1,6 +1,6 @@
 # Backlog v0.8.0 POC
 
-Backlog V0.7.1 est un correctif ciblé de migration. Il conserve sans changement l’interface, les recommandations, la classification, les fiches détaillées, les corrections manuelles et l’enrichissement Steam Store + IGDB de la V0.7.0.
+Backlog V0.8.0 POC ajoute un moteur expérimental d’analyse d’expérience entièrement séparé du moteur de recommandation historique. Il conserve l’interface, la classification, les fiches, les corrections manuelles et la réparation de migration V0.7.1, sans réinitialiser les données existantes.
 
 ## Régression corrigée
 
@@ -97,3 +97,97 @@ La suite couvre notamment :
 ## Sélection du pilote IA V0.8
 
 L'interface permet de rechercher les jeux de la bibliothèque, de les sélectionner manuellement, de visualiser le compteur et de valider explicitement la sélection avant toute future analyse. Le bouton de proposition crée un échantillon diversifié de 50 jeux qui reste modifiable et n'est jamais enregistré ni analysé sans validation. La limite de 50 est un garde-fou du POC uniquement, pas une limite de conception de l'architecture future.
+
+
+## Moteur d’analyse IA local
+
+### Architecture
+
+- Backlog reste sur le NAS et conserve SQLite ainsi que l’interface.
+- Ollama tourne sur le PC IA à `http://192.168.1.77:11434` par défaut.
+- `qwen3:32b` produit un profil d’expérience JSON versionné et validé.
+- `embeddinggemma` produit un vecteur strictement contrôlé à 768 dimensions.
+- Les similarités combinent 60 % de proximité sémantique et 40 % de proximité des dimensions d’expérience.
+- Le moteur explicable historique reste disponible et inchangé.
+
+### Construction du dossier
+
+Backlog constitue d’abord un dossier avec les données locales Steam et IGDB : genres, thèmes, plateformes, types, catégories, descriptions Steam, résumé et synopsis IGDB lorsqu’ils sont disponibles. Si ce dossier est insuffisant et si `SEARXNG_BASE_URL` est configuré, Backlog demande à SearXNG des résultats documentaires et conserve leurs extraits dans SQLite.
+
+Les URL des résultats sont conservées pour la traçabilité côté Backlog, mais elles ne sont jamais incluses dans le prompt. Qwen reçoit uniquement des identifiants de sources, leurs titres et leur texte. Le prompt lui interdit d’ouvrir ou de demander un lien et lui impose de signaler les informations absentes.
+
+### Reproductibilité
+
+Chaque requête de profil utilise :
+
+- température `0` ;
+- graine `42` ;
+- contexte `16384` ;
+- sortie JSON stricte ;
+- version de prompt `experience-profile-v1` ;
+- modèle, hachage des sources, dates, tentatives, erreurs et état persistés.
+
+Une modification des données locales, du modèle, de la version du prompt ou du modèle d’embedding rend le profil obsolète et permet son recalcul.
+
+### Tables SQLite ajoutées
+
+- `ai_analysis_runs` : exécutions, progression et erreurs globales ;
+- `ai_game_profiles` : profils JSON, versions, états et erreurs ;
+- `ai_document_sources` : dossier documentaire et traçabilité ;
+- `ai_embeddings` : vecteurs binaires 768 dimensions ;
+- `ai_similarities` : scores hybrides, ressemblances et différences.
+
+Toutes les tables rattachées aux jeux utilisent des clés étrangères avec suppression en cascade. Aucune table existante du moteur historique n’est remplacée.
+
+### Contrôle manuel
+
+Après validation du lot :
+
+1. **Tester Ollama** vérifie la présence de `qwen3:32b` et `embeddinggemma`.
+2. **Lancer l’analyse** traite les profils séquentiellement.
+3. **Suspendre** termine le jeu courant puis arrête proprement le lot.
+4. **Reprendre** ignore les profils déjà valides et continue les profils restants ou en erreur.
+5. La progression et les quatre états sont visibles dans l’interface.
+
+Un redémarrage transforme une analyse de jeu interrompue en état reprenable et marque l’exécution globale comme interrompue.
+
+### Fiches de jeux
+
+Les fiches affichent désormais :
+
+- les voisins du lot analysé ;
+- le score global, le score d’embedding et le score de profil ;
+- les ressemblances et différences les plus significatives ;
+- **Jouer** via `steam://run/APPID` ;
+- **Installer** via `steam://install/APPID` ;
+- **Voir sur Steam** via la page publique du magasin.
+
+### Configuration
+
+Copier `.env.example` vers `.env`, conserver l’adresse Ollama par défaut ou l’adapter, puis renseigner éventuellement :
+
+```dotenv
+OLLAMA_BASE_URL=http://192.168.1.77:11434
+OLLAMA_ANALYSIS_MODEL=qwen3:32b
+OLLAMA_EMBEDDING_MODEL=embeddinggemma
+SEARXNG_BASE_URL=http://adresse-searxng:port
+```
+
+Sur le PC Ollama :
+
+```bash
+ollama pull qwen3:32b
+ollama pull embeddinggemma
+```
+
+Le port Ollama doit rester limité au réseau local et ne doit pas être publié sur Internet.
+
+### Déploiement
+
+```bash
+cp .env.example .env
+# Renseigner les secrets et, si disponible, SEARXNG_BASE_URL
+docker compose up -d --build
+```
+
+Avant la mise à jour d’une instance existante, conserver une copie du dossier `data`. Les migrations V0.8 créent uniquement les nouvelles colonnes et tables manquantes.

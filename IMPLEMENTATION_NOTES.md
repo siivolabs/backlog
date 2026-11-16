@@ -33,3 +33,20 @@ La route de proposition ne persiste rien. La route de validation exige `x-admin-
 - Syntaxe Node.js vérifiée pour le serveur et le client.
 - 21 tests automatisés réussis.
 - Tests dédiés : proposition non persistée, validation explicite, protection administrative, rejet des AppID absents et garde-fou temporaire de 50 jeux.
+
+
+## Moteur effectif ajouté
+
+- `ai-engine.js` isole le pipeline IA du serveur et du moteur de recommandations historique.
+- Le pipeline est local-first : données Steam/IGDB persistées, puis SearXNG uniquement lorsque les descriptions locales sont absentes ou que les signaux sont insuffisants.
+- Le prompt Qwen exclut les URL et interdit explicitement toute navigation ; seuls les extraits textuels contrôlés sont fournis.
+- Les profils sont normalisés et refusés s’ils contiennent trop peu de dimensions exploitables.
+- Les vecteurs sont refusés si `embeddinggemma` ne renvoie pas exactement 768 valeurs numériques.
+- Les vecteurs sont stockés en BLOB Float32, soit 3 072 octets par jeu.
+- La similarité combine cosinus des embeddings (60 %) et dimensions structurées (40 %).
+- Les opérations qui modifieraient la bibliothèque ou les sources sont verrouillées pendant l’analyse.
+- Une reprise ignore les profils dont le modèle, la version de prompt, le modèle d’embedding et le hachage local sont encore valides.
+
+## Limite de validation
+
+L’environnement de construction ne peut pas atteindre l’adresse privée `192.168.1.77`. Les appels réels doivent être vérifiés après déploiement avec le bouton **Tester Ollama**. Les tests automatisés utilisent des doubles HTTP complets d’Ollama et de SearXNG et valident les contrats JSON, les 768 dimensions, la persistance et la reprise.
