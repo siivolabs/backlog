@@ -1,5 +1,16 @@
 # Journal des versions
 
+## 0.7.1 — Correctif de migration des statuts
+
+- Suppression de la réinitialisation destructive `synced`/`unavailable` vers `pending`.
+- Réparation transactionnelle et idempotente depuis les sources persistées et `metadata_cache`.
+- Restauration distincte des statuts `synced` et `unavailable`.
+- Conservation des erreurs temporaires et remise des anciens `syncing` à `pending`.
+- Préservation intégrale des métadonnées, corrections manuelles et associations IGDB.
+- Marque de migration et bilan JSON persistés dans `settings`.
+- Tests de migration V0.6.1, base V0.7.0 endommagée et distribution de 4 321 jeux.
+- Aucun changement d’interface ni de fonctionnalité.
+
 ## 0.7.0 — Recommandations explicables et fiches détaillées
 
 - Premier moteur de recommandation déterministe `explainable-v1`.

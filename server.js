@@ -6,7 +6,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const STATUS_VALUES = ['pending', 'syncing', 'synced', 'temporary_error', 'unavailable'];
 const APPLICATION_TYPES = ['full_game', 'demo', 'beta', 'prototype', 'public_test', 'dedicated_server', 'software_tool', 'dlc', 'multiplayer_component', 'unknown'];
 const RECOMMENDATION_ALGORITHM = 'explainable-v1';
@@ -89,6 +89,86 @@ function transaction(db, operation) {
     try { db.exec('ROLLBACK'); } catch { /* no-op */ }
     throw error;
   }
+}
+
+function repairMetadataStatuses071(db) {
+  const markerKey = 'migration_071_status_repair';
+  const existingMarker = db.prepare('SELECT value FROM settings WHERE key = ?').get(markerKey)?.value;
+  let result = { applied: false, marker: existingMarker || null };
+  if (!existingMarker) result = transaction(db, () => {
+    const repairedFromSource = Number(db.prepare(`UPDATE games
+      SET metadata_status = 'synced', metadata_error = NULL, next_retry_at = NULL
+      WHERE metadata_status = 'pending'
+        AND metadata_updated_at IS NOT NULL
+        AND metadata_source IN ('steam_store', 'igdb')`).run().changes);
+
+    // A completed IGDB fallback may be recovered from the persistent exact-AppID cache.
+    // Existing game values win; the cache only fills fields that are absent.
+    const repairedFromCache = Number(db.prepare(`UPDATE games
+      SET metadata_status = 'synced',
+          metadata_error = NULL,
+          next_retry_at = NULL,
+          metadata_source = 'igdb',
+          metadata_sources = '["igdb"]',
+          metadata_provider_id = COALESCE(metadata_provider_id, (
+            SELECT provider_id FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          )),
+          igdb_provider_id = COALESCE(igdb_provider_id, (
+            SELECT provider_id FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          )),
+          name = CASE WHEN name IS NULL OR name = '' THEN COALESCE((
+            SELECT name FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          ), name) ELSE name END,
+          genres = CASE WHEN genres IS NULL OR genres = '' OR genres = '[]' THEN COALESCE((
+            SELECT genres FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          ), '[]') ELSE genres END,
+          themes = CASE WHEN themes IS NULL OR themes = '' OR themes = '[]' THEN COALESCE((
+            SELECT themes FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          ), '[]') ELSE themes END,
+          platforms = CASE WHEN platforms IS NULL OR platforms = '' OR platforms = '[]' THEN COALESCE((
+            SELECT platforms FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          ), '[]') ELSE platforms END,
+          metadata_cover_url = COALESCE(metadata_cover_url, (
+            SELECT cover_url FROM metadata_cache c WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT)
+          ))
+      WHERE metadata_status = 'pending'
+        AND metadata_updated_at IS NOT NULL
+        AND (metadata_source IS NULL OR metadata_source = '')
+        AND EXISTS (
+          SELECT 1 FROM metadata_cache c
+          WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT) AND c.found = 1
+        )`).run().changes);
+
+    const repairedUnavailable = Number(db.prepare(`UPDATE games
+      SET metadata_status = 'unavailable',
+          metadata_error = COALESCE(NULLIF(metadata_error, ''), 'Aucune fiche Steam Store ni correspondance IGDB par AppID.'),
+          next_retry_at = NULL,
+          metadata_source = NULL,
+          metadata_sources = '[]'
+      WHERE metadata_status = 'pending'
+        AND metadata_updated_at IS NOT NULL
+        AND (metadata_source IS NULL OR metadata_source = '')
+        AND EXISTS (
+          SELECT 1 FROM metadata_cache c
+          WHERE c.provider = 'igdb' AND c.external_id = CAST(games.appid AS TEXT) AND c.found = 0
+        )`).run().changes);
+
+    const marker = JSON.stringify({
+      completedAt: nowIso(),
+      repairedSynced: repairedFromSource + repairedFromCache,
+      repairedFromSource,
+      repairedFromCache,
+      repairedUnavailable
+    });
+    db.prepare(`INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+      .run(markerKey, marker, nowIso());
+    return { applied: true, marker, repairedFromSource, repairedFromCache, repairedUnavailable };
+  });
+  // A process interrupted while a request was in flight must always be resumable,
+  // but it must not be mistaken for a status damaged by the V0.7.0 migration.
+  const interrupted = Number(db.prepare("UPDATE games SET metadata_status = 'pending' WHERE metadata_status = 'syncing'").run().changes);
+  return { ...result, interrupted };
 }
 
 function initializeDatabase(db) {
@@ -189,7 +269,6 @@ function initializeDatabase(db) {
   // Migration non destructive depuis V0.5.
   const existing = new Set(db.prepare('PRAGMA table_info(games)').all().map((row) => row.name));
   const migratingFromPre061 = !existing.has('metadata_source');
-  const migratingFromPre07 = !existing.has('application_type');
   const additions = {
     playtime_forever: 'INTEGER NOT NULL DEFAULT 0',
     playtime_windows_forever: 'INTEGER NOT NULL DEFAULT 0',
@@ -238,7 +317,6 @@ function initializeDatabase(db) {
     CREATE INDEX IF NOT EXISTS idx_games_name ON games(name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_metadata_cache_expiry ON metadata_cache(provider, expires_at);
     CREATE INDEX IF NOT EXISTS idx_games_application_type ON games(application_type);
-    UPDATE games SET metadata_status = 'pending' WHERE metadata_status = 'syncing';
     UPDATE games SET genres = '[]' WHERE genres IS NULL OR genres = '';
     UPDATE games SET themes = '[]' WHERE themes IS NULL OR themes = '';
     UPDATE games SET platforms = '[]' WHERE platforms IS NULL OR platforms = '';
@@ -255,10 +333,7 @@ function initializeDatabase(db) {
         WHERE metadata_status = 'unavailable' AND (metadata_source IS NULL OR metadata_source = '');
     `);
   }
-  if (migratingFromPre07) {
-    db.exec(`UPDATE games SET metadata_status = 'pending', metadata_error = NULL, next_retry_at = NULL
-      WHERE metadata_status IN ('synced', 'unavailable')`);
-  }
+  repairMetadataStatuses071(db);
 }
 
 function createSettingsStore(db) {

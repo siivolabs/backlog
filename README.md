@@ -1,152 +1,78 @@
-# Backlog v0.7.0
+# Backlog v0.7.1
 
-Backlog est une bibliothèque Steam auto-hébergée avec persistance SQLite. La V0.7.0 conserve l’interface, la synchronisation de profils publics et l’enrichissement Steam Store + IGDB de la V0.6.1, puis ajoute le premier moteur de recommandation, une classification plus précise et une fiche détaillée éditable.
+Backlog V0.7.1 est un correctif ciblé de migration. Il conserve sans changement l’interface, les recommandations, la classification, les fiches détaillées, les corrections manuelles et l’enrichissement Steam Store + IGDB de la V0.7.0.
 
-## Premier moteur de recommandation
+## Régression corrigée
 
-Le moteur `explainable-v1` est **déterministe** : aucune sélection aléatoire n’est utilisée. À données et options identiques, l’ordre et les scores restent identiques.
+La V0.7.0 contenait ce comportement lors d’une migration depuis une version antérieure :
 
-Il établit un profil depuis les jeux déjà lancés, pondéré par le temps de jeu Steam, puis explique chaque suggestion avec les facteurs disponibles :
-
-- jeu jamais lancé ou déjà joué ;
-- temps de jeu des titres ayant construit le profil ;
-- genres communs ;
-- thèmes communs ;
-- plateformes cohérentes avec l’historique ;
-- type d’application ;
-- source des métadonnées et niveau de complétude.
-
-Par défaut, les recommandations concernent les jeux complets jamais lancés. Deux options permettent d’inclure les jeux déjà lancés et, explicitement, les autres types d’applications. Les scores, raisons et facteurs du dernier calcul sont conservés dans `recommendation_cache`.
-
-## Classification des entrées Steam
-
-Backlog distingue :
-
-- jeu complet ;
-- démo ;
-- bêta ;
-- prototype ;
-- test public ;
-- serveur dédié ;
-- logiciel ou outil ;
-- DLC ;
-- composant multijoueur ;
-- type inconnu.
-
-La priorité va aux types explicites Steam Store, puis aux types IGDB et à des signaux de nom limités. Une entrée ordinaire de `GetOwnedGames`, sans signal contraire, est classée jeu complet avec une confiance faible jusqu’à son enrichissement.
-
-Les applications techniques et non jouables restent dans la bibliothèque, sont accessibles par le filtre **Type d’application**, mais sont exclues des recommandations par défaut.
-
-Le statut auparavant présenté comme « Indisponible » est affiché comme **« Métadonnées introuvables »** : la possession Steam est conservée, mais aucune fiche Steam Store ni correspondance IGDB exacte n’a été trouvée.
-
-## Métadonnées Steam et IGDB
-
-Steam Store reste la source primaire. IGDB ajoute ou fournit, selon les données disponibles :
-
-- genres ;
-- thèmes ;
-- plateformes ;
-- type IGDB ;
-- jaquette de secours.
-
-Le rapprochement automatique IGDB reste strictement fondé sur le Steam AppID dans `external_games`. Aucun rapprochement approximatif par nom n’est effectué.
-
-La table `igdb_manual_matches` et l’état exposé dans la fiche préparent un futur choix manuel explicite. Cette version n’invente et n’applique aucune correspondance incertaine.
-
-## Fiche détaillée et corrections manuelles
-
-Chaque carte ou ligne ouvre une fiche contenant au minimum :
-
-- titre et jaquette ;
-- AppID Steam ;
-- temps de jeu et statut joué/jamais lancé ;
-- type d’application ;
-- genres, thèmes et plateformes ;
-- sources des métadonnées ;
-- état de synchronisation ;
-- raison et confiance de la classification ;
-- état du futur rapprochement manuel IGDB.
-
-La fiche permet de corriger le titre affiché, le type, les genres, thèmes et plateformes. L’écriture exige `ADMIN_TOKEN`.
-
-Les corrections sont stockées séparément dans `game_manual_overrides` :
-
-- elles ont priorité dans l’interface, les filtres et les recommandations ;
-- Steam et IGDB peuvent continuer à actualiser leurs valeurs sources ;
-- les valeurs sources ne sont jamais écrasées par une correction manuelle ;
-- l’action **Rétablir les valeurs sources** supprime uniquement les corrections du jeu concerné.
-
-L’API rejette les champs inconnus, les types non autorisés, les listes non textuelles, vides, dupliquées, trop longues ou dépassant 30 éléments.
-
-## Icônes d’état accessibles
-
-Les badges textuels superposés aux jaquettes sont remplacés par de petites icônes :
-
-- coche verte : synchronisé ;
-- indicateur discret : en attente ;
-- rotation bleue : en cours ;
-- point d’alerte orange : erreur temporaire ;
-- vigilance orange : métadonnées introuvables ou anomalie.
-
-Le libellé complet, la source et l’erreur éventuelle restent disponibles dans l’infobulle et dans un texte réservé aux lecteurs d’écran.
-
-## Configuration
-
-Les variables de la V0.6.1 sont conservées :
-
-```yaml
-environment:
-  STEAM_API_KEY: ta_cle_web_api_steam
-  ADMIN_TOKEN: un_secret_long_et_aleatoire
-  TWITCH_CLIENT_ID: identifiant_client_twitch
-  TWITCH_CLIENT_SECRET: secret_client_twitch
+```sql
+UPDATE games
+SET metadata_status = 'pending', metadata_error = NULL, next_retry_at = NULL
+WHERE metadata_status IN ('synced', 'unavailable');
 ```
 
-Réglages facultatifs :
+Les métadonnées et le cache SQLite restaient présents, mais les jeux terminés redevenaient artificiellement éligibles à l’enrichissement. Ce bloc a été supprimé.
 
-```yaml
-STEAM_METADATA_CONCURRENCY: 4
-STEAM_REQUEST_INTERVAL_MS: 150
-IGDB_BATCH_SIZE: 100
-IGDB_CACHE_TTL_HOURS: 720
-IGDB_MISS_CACHE_TTL_HOURS: 24
-METADATA_LANGUAGE: french
-METADATA_COUNTRY: FR
-```
+## Réparation automatique V0.7.1
 
-Le montage persistant reste :
+Au premier démarrage, V0.7.1 exécute une réparation transactionnelle et idempotente :
 
-```yaml
-volumes:
-  - ./data:/data
-```
+1. Un jeu `pending` possédant une source terminée (`steam_store` ou `igdb`) et une date de métadonnées redevient `synced`.
+2. Un jeu `pending` sans source directe, mais disposant d’une correspondance IGDB exacte et trouvée dans `metadata_cache`, redevient `synced`. Les données du cache ne remplissent que les champs absents : les données existantes ne sont pas écrasées.
+3. Un jeu `pending` dont le traitement était terminé, sans source, et dont le cache IGDB contient une absence exacte (`found = 0`) devient `unavailable`, affiché dans l’interface comme **Métadonnées introuvables**.
+4. Les `temporary_error` restent inchangés et conservent leur prochaine date de tentative.
+5. Les anciens `syncing` deviennent toujours `pending` après une interruption. Ils ne sont pas confondus avec les statuts endommagés par la migration.
 
-## Migration depuis V0.6.1
+Une marque `migration_071_status_repair` est écrite dans `settings` dans la même transaction que la réparation. La réparation destructive ne peut donc pas être rejouée à chaque démarrage. Une transaction interrompue est entièrement annulée et sera reprise au démarrage suivant.
 
-1. Suspendre l’enrichissement.
+## Données préservées
+
+Le correctif ne supprime et ne réinitialise pas :
+
+- les noms, genres, thèmes, plateformes et types d’applications ;
+- les sources et identifiants Steam/IGDB ;
+- `metadata_cache` et ses entrées négatives ;
+- les corrections de `game_manual_overrides` ;
+- les associations de `igdb_manual_matches` ;
+- les recommandations et autres tables applicatives ;
+- les erreurs temporaires légitimes.
+
+Aucune requête Steam ou IGDB n’est effectuée pendant la migration.
+
+## Effet attendu sur la base observée
+
+Pour une base contenant 4 321 jeux, 4 321 entrées de cache, 4 258 jeux avec genres et les statuts `3893 pending / 402 synced / 26 temporary_error`, V0.7.1 recalcule les statuts depuis les sources persistées et le drapeau `found` du cache.
+
+Le nombre exact de jeux `synced` et `unavailable` dépend donc des correspondances réellement trouvées dans `metadata_cache`. Les jeux réparés ne restent plus `pending` et ne sont pas ré-enrichis inutilement. Les 26 erreurs temporaires restent inchangées.
+
+## Déploiement depuis V0.7.0
+
+1. Suspendre un éventuel enrichissement encore actif.
 2. Sauvegarder `data/backlog.sqlite`.
-3. Publier les fichiers V0.7.0.
-4. Laisser GitHub Actions reconstruire l’image `dev`.
+3. Publier les fichiers V0.7.1 dans le dépôt GitHub.
+4. Attendre la reconstruction de `ghcr.io/siivolabs/backlog:dev`.
 5. Dans Dockge, effectuer **Pull**, puis recréer le conteneur.
+6. Ouvrir Backlog et contrôler la répartition des statuts avant de relancer manuellement un enrichissement.
 
-La migration ajoute les champs et tables nécessaires sans supprimer la bibliothèque, les métadonnées ou le cache existants. Lors du premier démarrage V0.7, les entrées déjà traitées repassent une seule fois à `pending` afin de récupérer les types, thèmes et plateformes nécessaires à la classification et aux recommandations. Les corrections manuelles restent séparées et prioritaires.
+Aucune variable d’environnement ni modification du Compose n’est nécessaire.
 
-## API ajoutée
+## Contrôle SQLite facultatif
 
-| Méthode | Route | Protection | Fonction |
-|---|---|---|---|
-| `GET` | `/api/recommendations` | publique | Suggestions déterministes et explications |
-| `GET` | `/api/games/:appid` | publique | Fiche détaillée, sources et corrections actives |
-| `PATCH` | `/api/games/:appid/manual` | `X-Admin-Token` | Créer ou modifier les corrections |
-| `DELETE` | `/api/games/:appid/manual` | `X-Admin-Token` | Rétablir les valeurs sources |
+Après le premier démarrage V0.7.1 :
 
-Paramètres de recommandation :
+```sql
+SELECT metadata_status, COUNT(*)
+FROM games
+GROUP BY metadata_status
+ORDER BY metadata_status;
 
-```text
-limit=1..24
-includePlayed=0|1
-includeNonGames=0|1
+SELECT value
+FROM settings
+WHERE key = 'migration_071_status_repair';
 ```
+
+La seconde requête renvoie le bilan JSON de la réparation : jeux restaurés depuis leur source, jeux restaurés depuis le cache et métadonnées introuvables.
 
 ## Tests
 
@@ -156,4 +82,13 @@ node --check server.js
 node --check public/app.js
 ```
 
-Les tests simulent Steam, Twitch OAuth et IGDB. Aucun secret ni appel réseau réel n’est requis.
+La suite couvre notamment :
+
+- la migration d’une base V0.6.1 entièrement enrichie ;
+- la réparation d’une base V0.7.0 dont les statuts ont été réinitialisés ;
+- la distribution observée de 4 321 jeux ;
+- l’idempotence sur plusieurs redémarrages ;
+- la reprise des anciens `syncing` ;
+- la préservation du cache, des métadonnées, des corrections manuelles et des associations IGDB ;
+- l’absence de jeux terminés encore éligibles à un enrichissement inutile ;
+- toutes les non-régressions V0.7.0.

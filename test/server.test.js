@@ -127,7 +127,7 @@ test('health and config do not expose secrets', async (t) => {
   await withServer(t, async ({ baseUrl }) => {
     const health = await api(baseUrl, '/healthz');
     assert.equal(health.response.status, 200);
-    assert.deepEqual(health.body, { status: 'ok', version: '0.7.0' });
+    assert.deepEqual(health.body, { status: 'ok', version: '0.7.1' });
 
     const config = await api(baseUrl, '/api/config');
     assert.equal(config.body.steamApiConfigured, true);

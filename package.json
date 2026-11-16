@@ -1,6 +1,6 @@
 {
   "name": "siivolabs-backlog",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Bibliothèque Steam auto-hébergée avec synchronisation et enrichissement progressif",
   "main": "server.js",
