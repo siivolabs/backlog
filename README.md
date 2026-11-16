@@ -1,96 +1,106 @@
-# Backlog v0.4
+# Backlog v0.5
 
-Backlog v0.4 réunit dans le même conteneur :
+Backlog v0.5 conserve l’interface et l’ergonomie de la v0.4, mais déplace la bibliothèque Steam et les métadonnées enrichies dans une base **SQLite persistante**.
 
-- l’interface HTML/CSS/JavaScript de la bibliothèque Steam ;
-- l’import local d’un export `GetOwnedGames` (`response.txt` ou JSON) ;
-- les jaquettes Steam ;
-- la recherche, les filtres, le tri, les statistiques et deux modes d’affichage ;
-- un proxy local vers la fiche Steam d’un jeu ;
-- un enrichissement volontairement limité à **10 jeux par lot**.
+## Ce qui change en v0.5
 
-## Limites volontaires de cette version
+- La bibliothèque importée est restaurée automatiquement après un rechargement, une nouvelle session ou un redémarrage du conteneur.
+- Les genres récupérés auprès de Steam sont enregistrés dans SQLite et restent disponibles entre les sessions.
+- Le volume Docker nommé `backlog_data` conserve `/data/backlog.sqlite` lors du remplacement de l’image ou de la recréation du conteneur.
+- Le message **« La bibliothèque est vide »** disparaît dès que des résultats sont affichés.
+- Si une bibliothèque existe mais qu’un filtre ne renvoie rien, l’interface affiche **« Aucun jeu ne correspond à vos critères »**.
 
-- Le fichier Steam reste uniquement dans la mémoire du navigateur.
-- Les genres enrichis disparaissent au rechargement de la page.
-- Aucun enrichissement automatique des 4 321 jeux n’est effectué.
-- Le cache du serveur est uniquement en mémoire et expire après 30 minutes.
-- L’application n’intègre ni compte utilisateur ni authentification.
-
-Le cache persistant, la file d’attente globale et la synchronisation complète restent réservés à une version ultérieure.
+L’apparence, les cartes, les statistiques, la recherche, les filtres, le tri, la pagination, l’affichage grille/liste et le lot d’enrichissement limité à dix jeux restent dans la continuité de la v0.4.
 
 ## Arborescence
 
 ```text
 backlog/
+├── .github/workflows/docker-publish.yml
 ├── public/
 │   ├── index.html
 │   ├── styles.css
 │   └── app.js
-├── test/
-│   └── server.test.js
+├── test/server.test.js
 ├── .dockerignore
+├── CHANGELOG.md
 ├── compose.yaml
 ├── Dockerfile
 ├── package.json
-├── README.md
 └── server.js
 ```
 
-Le workflow GitHub Actions déjà présent dans `.github/workflows/` ne doit pas être supprimé.
+## Stockage SQLite
 
-Tests locaux, sans dépendance externe :
+Par défaut :
+
+```text
+/data/backlog.sqlite
+```
+
+Le fichier principal et ses éventuels fichiers WAL restent dans le volume `backlog_data`. Ne retire pas ce volume lors d’un simple déploiement d’une nouvelle image.
+
+Sauvegarde facultative depuis le NAS :
+
+```bash
+docker run --rm \
+  -v backlog_backlog_data:/data:ro \
+  -v "$PWD":/backup \
+  alpine sh -c 'tar czf /backup/backlog-data.tgz -C /data .'
+```
+
+Le nom réel du volume peut être préfixé par le nom de la stack Dockge. Vérifie-le avec `docker volume ls`.
+
+## Publication avec GitHub Web
+
+1. Décompresse l’archive.
+2. Remplace les fichiers correspondants dans `siivolabs/backlog`.
+3. Conserve ton workflow existant s’il est déjà opérationnel ; le workflow fourni est compatible avec le tag `dev`.
+4. Valide avec un message comme :
+
+```text
+Add SQLite persistence in Backlog v0.5
+```
+
+5. Attends la réussite de GitHub Actions.
+
+## Déploiement dans Dockge
+
+Le `compose.yaml` fourni suppose que Nginx Proxy Manager et Backlog partagent le réseau externe `npm_default`, et que le Proxy Host transmet vers `backlog-test:3000`.
+
+1. Remplace la configuration Compose par celle de la v0.5.
+2. Dans Dockge, effectue **Pull**.
+3. Recrée le conteneur.
+4. N’utilise pas une option qui supprime les volumes.
+5. Ouvre `http://backlog.home/`.
+
+Le nouveau volume sera créé automatiquement au premier lancement.
+
+## Recette recommandée
+
+1. Ouvrir `/healthz` et vérifier `{"status":"ok","version":"0.5.0","storage":"sqlite"}`.
+2. Importer `response.txt` et vérifier les nombres habituels.
+3. Confirmer que **« La bibliothèque est vide »** n’est plus visible quand les cartes sont affichées.
+4. Recharger la page : la bibliothèque doit revenir sans nouvel import.
+5. Enrichir jusqu’à dix jeux.
+6. Recharger la page puis redémarrer le conteneur : les genres doivent toujours être présents.
+7. Appliquer une recherche impossible : seul **« Aucun jeu ne correspond à vos critères »** doit apparaître.
+8. Tester l’AppID `400` et un AppID invalide.
+
+## Développement local
+
+Backlog n’a aucune dépendance npm externe. Il utilise `node:sqlite`, disponible à partir de Node 22.5 ; l’image fournie utilise Node 24.
 
 ```bash
 npm test
+npm run check
+DB_PATH=./backlog.sqlite npm start
 ```
 
-## Publication via GitHub Web
+## Sécurité et limites
 
-1. Décompresser l’archive v0.4.
-2. Dans le dépôt `siivolabs/backlog`, remplacer `server.js`, `Dockerfile`, `compose.yaml` et `README.md`.
-3. Ajouter `.dockerignore`, `package.json`, le dossier `public` et, si souhaité, le dossier `test`.
-4. Conserver `.github/workflows/docker-publish.yml`.
-5. Valider avec un message comme `Integrate Backlog v0.4 UI`.
-6. Attendre que l’action GitHub reconstruise `ghcr.io/siivolabs/backlog:dev`.
-
-## Déploiement avec Dockge
-
-Le `compose.yaml` fourni suppose que :
-
-- Nginx Proxy Manager utilise le réseau Docker externe `npm_default` ;
-- le Proxy Host transmet vers `backlog-test` sur le port interne `3000` ;
-- aucun port Backlog n’est publié sur le NAS.
-
-Dans Dockge :
-
-1. effectuer **Pull** pour récupérer la nouvelle image `dev` ;
-2. recréer/redéployer le conteneur ;
-3. ouvrir `http://backlog.home/` ;
-4. tester l’AppID `400` ;
-5. importer `response.txt` ;
-6. lancer un seul lot de 10 jeux et vérifier les genres.
-
-## Vérifications rapides
-
-```bash
-curl http://127.0.0.1:3000/healthz
-curl http://127.0.0.1:3000/api/steam/400
-```
-
-La première commande doit renvoyer `{"status":"ok","version":"0.4.0"}`. La seconde dépend de l’accès Internet à Steam.
-
-Si aucun port n’est publié sur l’hôte, exécuter ces commandes depuis le conteneur ou tester via le Proxy Host Nginx.
-
-## Sécurité
-
-Le conteneur :
-
-- fonctionne avec l’utilisateur non privilégié `node` ;
-- accepte un système de fichiers en lecture seule ;
-- n’utilise aucun volume ni secret Steam ;
-- retire les capacités Linux supplémentaires ;
-- applique des en-têtes HTTP restrictifs ;
-- valide les AppID et limite les requêtes de métadonnées.
-
-Le Proxy Host doit rester limité au réseau local ou protégé par une règle d’accès. Un réseau Docker partagé contrôle le chemin réseau, mais ne remplace pas l’authentification.
+- Conteneur non privilégié, capacités Linux retirées et système de fichiers racine en lecture seule.
+- Écriture limitée au volume `/data` et à un petit `tmpfs`.
+- Validation des AppID, limite de taille d’import et limite de requêtes vers Steam.
+- Aucun compte utilisateur ni authentification : garde le Proxy Host sur ton réseau local ou protège-le.
+- Aucun enrichissement massif automatique : un lot reste limité à dix jeux.

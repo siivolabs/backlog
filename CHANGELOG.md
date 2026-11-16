@@ -1,13 +1,19 @@
-# Journal des changements
+# Changelog
 
-## 0.4.0
+## 0.5.0 — 2026-11-16
 
-- Sert l’interface Backlog depuis le même conteneur et le même domaine que l’API.
-- Conserve l’import local de l’export Steam et le catalogue à jaquettes.
-- Ajoute l’affichage en grille ou en liste, la recherche, les tris, les filtres et la pagination.
-- Ajoute le test manuel d’une fiche Steam par AppID.
-- Ajoute l’enrichissement séquentiel et explicite de 10 jeux visibles au maximum.
-- Affiche les genres récupérés et permet de filtrer les genres déjà enrichis.
-- Ajoute un cache mémoire temporaire, la coalescence des requêtes identiques et une limitation simple du débit.
-- Ajoute une route de santé et des en-têtes HTTP de sécurité.
-- Renforce l’image Docker non privilégiée et la configuration Compose sans port publié.
+### Ajouté
+- Base SQLite persistante pour les jeux, l’état d’import et les métadonnées Steam.
+- Restauration automatique de la bibliothèque au chargement de la page.
+- Volume Docker nommé `backlog_data` monté sur `/data`.
+- Routes `GET /api/library`, `POST /api/library/import`, `DELETE /api/library` et `POST /api/library/enrich`.
+- Tests de persistance, de cache et de limite des lots.
+
+### Corrigé
+- Le message « La bibliothèque est vide » est masqué quand des jeux sont visibles.
+- Un message distinct s’affiche lorsqu’une bibliothèque importée ne contient aucun résultat correspondant aux filtres.
+
+### Conservé
+- Présentation générale de la v0.4.
+- Import Steam, jaquettes, statistiques, recherche, filtres, tri, pagination et affichages grille/liste.
+- Test d’un AppID et enrichissement séquentiel limité à dix jeux.

@@ -1,14 +1,17 @@
 {
-  "name": "@siivolabs/backlog",
-  "version": "0.4.0",
+  "name": "backlog",
+  "version": "0.5.0",
   "private": true,
-  "description": "Self-hosted Steam library and recommendation prototype",
-  "license": "UNLICENSED",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "Bibliothèque Steam auto-hébergée avec cache SQLite persistant",
+  "type": "commonjs",
+  "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
-  }
+    "test": "node --test",
+    "check": "node --check server.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "UNLICENSED"
 }
