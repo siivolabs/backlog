@@ -1,0 +1,13 @@
+services:
+  backlog-proxy-test:
+    build: .
+    ports:
+      - "127.0.0.1:3087:3000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    restart: "no"
