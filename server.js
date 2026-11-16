@@ -6,8 +6,11 @@ const http = require('node:http');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const VERSION = '0.6.1';
+const VERSION = '0.7.0';
 const STATUS_VALUES = ['pending', 'syncing', 'synced', 'temporary_error', 'unavailable'];
+const APPLICATION_TYPES = ['full_game', 'demo', 'beta', 'prototype', 'public_test', 'dedicated_server', 'software_tool', 'dlc', 'multiplayer_component', 'unknown'];
+const RECOMMENDATION_ALGORITHM = 'explainable-v1';
+const NON_RECOMMENDABLE_TYPES = new Set(['demo', 'beta', 'prototype', 'public_test', 'dedicated_server', 'software_tool', 'dlc', 'multiplayer_component']);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 class HttpError extends Error {
@@ -28,6 +31,52 @@ function safeJsonParse(value, fallback = []) {
 function booleanFromEnv(value, fallback = false) {
   if (value == null || value === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+}
+
+function uniqueStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+function normalizedText(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function classifyApplication(metadata = {}) {
+  const name = normalizedText(metadata.name);
+  const steamType = normalizedText(metadata.steamType).replace(/[^a-z]/g, '');
+  const igdbType = normalizedText(metadata.igdbType).replace(/[_-]+/g, ' ');
+  const categories = uniqueStrings(metadata.categories).map(normalizedText).join(' ');
+  const explicit = (applicationType, source, reason, confidence = 'high') => ({ applicationType, source, reason, confidence });
+
+  if (steamType === 'dlc' || /\b(dlc|downloadable content|add on|expansion pass|season pass)\b/.test(igdbType)) {
+    return explicit('dlc', steamType === 'dlc' ? 'steam_store' : 'igdb', 'Type DLC explicite.');
+  }
+  if (/\b(dedicated server|serveur dedie)\b/.test(`${name} ${categories}`)) {
+    return explicit('dedicated_server', 'metadata', 'Serveur dédié identifié dans les métadonnées.');
+  }
+  if (['software', 'tool', 'advertising'].includes(steamType) || /\b(sdk|editor|benchmark|configuration tool|development tool|software)\b/.test(`${name} ${categories}`)) {
+    return explicit('software_tool', steamType ? 'steam_store' : 'name_signal', 'Logiciel ou outil technique identifié.');
+  }
+  if (steamType === 'demo' || /\b(demo|trial)\b/.test(igdbType) || /\b(demo|demonstration)\b/.test(name)) {
+    return explicit('demo', steamType === 'demo' ? 'steam_store' : 'metadata', 'Version de démonstration identifiée.');
+  }
+  if (/\b(playtest|public test|public testing|test public|test server|pts)\b/.test(`${name} ${igdbType}`)) {
+    return explicit('public_test', 'metadata', 'Version de test public identifiée.');
+  }
+  if (/\b(prototype|jam build|proof of concept)\b/.test(`${name} ${igdbType}`)) {
+    return explicit('prototype', 'metadata', 'Prototype identifié.');
+  }
+  if (/\b(beta|alpha|early test)\b/.test(`${name} ${igdbType}`)) {
+    return explicit('beta', 'metadata', 'Version bêta ou alpha identifiée.');
+  }
+  if (/\b(multiplayer component|multiplayer only|multijoueur)\b/.test(`${name} ${igdbType}`)) {
+    return explicit('multiplayer_component', 'metadata', 'Composant multijoueur distinct identifié.');
+  }
+  if (['game', 'mod'].includes(steamType) || /\b(main game|remake|remaster|port|standalone expansion|expanded game|episode)\b/.test(igdbType)) {
+    return explicit('full_game', steamType ? 'steam_store' : 'igdb', 'Jeu jouable identifié par le fournisseur.');
+  }
+  if (metadata.ownedGame) return explicit('full_game', 'steam_library', 'Entrée de bibliothèque Steam sans signal contraire.', 'low');
+  return explicit('unknown', 'unclassified', 'Type insuffisamment documenté.', 'low');
 }
 
 function transaction(db, operation) {
@@ -57,13 +106,23 @@ function initializeDatabase(db) {
       rtime_last_played INTEGER NOT NULL DEFAULT 0,
       img_icon_url TEXT NOT NULL DEFAULT '',
       genres TEXT NOT NULL DEFAULT '[]',
+      themes TEXT NOT NULL DEFAULT '[]',
+      platforms TEXT NOT NULL DEFAULT '[]',
+      steam_type TEXT,
+      igdb_game_type TEXT,
+      application_type TEXT NOT NULL DEFAULT 'unknown',
+      classification_source TEXT,
+      classification_reason TEXT,
+      classification_confidence TEXT NOT NULL DEFAULT 'low',
       metadata_status TEXT NOT NULL DEFAULT 'pending',
       metadata_error TEXT,
       metadata_attempts INTEGER NOT NULL DEFAULT 0,
       metadata_updated_at TEXT,
       next_retry_at TEXT,
       metadata_source TEXT,
+      metadata_sources TEXT NOT NULL DEFAULT '[]',
       metadata_provider_id TEXT,
+      igdb_provider_id TEXT,
       metadata_cover_url TEXT,
       source_steamid TEXT,
       last_seen_at TEXT,
@@ -91,17 +150,46 @@ function initializeDatabase(db) {
       provider_id TEXT,
       name TEXT,
       genres TEXT NOT NULL DEFAULT '[]',
+      themes TEXT NOT NULL DEFAULT '[]',
+      platforms TEXT NOT NULL DEFAULT '[]',
+      game_type TEXT,
       cover_url TEXT,
       found INTEGER NOT NULL DEFAULT 0,
       fetched_at TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       PRIMARY KEY(provider, external_id)
     );
+    CREATE TABLE IF NOT EXISTS game_manual_overrides (
+      appid INTEGER PRIMARY KEY REFERENCES games(appid) ON DELETE CASCADE,
+      display_name TEXT,
+      application_type TEXT,
+      genres TEXT,
+      themes TEXT,
+      platforms TEXT,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL DEFAULT 'admin'
+    );
+    CREATE TABLE IF NOT EXISTS igdb_manual_matches (
+      appid INTEGER PRIMARY KEY REFERENCES games(appid) ON DELETE CASCADE,
+      igdb_game_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'unmatched',
+      updated_at TEXT NOT NULL,
+      CHECK (status IN ('unmatched', 'confirmed', 'rejected'))
+    );
+    CREATE TABLE IF NOT EXISTS recommendation_cache (
+      appid INTEGER PRIMARY KEY REFERENCES games(appid) ON DELETE CASCADE,
+      algorithm_version TEXT NOT NULL,
+      score REAL NOT NULL,
+      reasons TEXT NOT NULL DEFAULT '[]',
+      factors TEXT NOT NULL DEFAULT '{}',
+      generated_at TEXT NOT NULL
+    );
   `);
 
   // Migration non destructive depuis V0.5.
   const existing = new Set(db.prepare('PRAGMA table_info(games)').all().map((row) => row.name));
   const migratingFromPre061 = !existing.has('metadata_source');
+  const migratingFromPre07 = !existing.has('application_type');
   const additions = {
     playtime_forever: 'INTEGER NOT NULL DEFAULT 0',
     playtime_windows_forever: 'INTEGER NOT NULL DEFAULT 0',
@@ -110,13 +198,23 @@ function initializeDatabase(db) {
     rtime_last_played: 'INTEGER NOT NULL DEFAULT 0',
     img_icon_url: "TEXT NOT NULL DEFAULT ''",
     genres: "TEXT NOT NULL DEFAULT '[]'",
+    themes: "TEXT NOT NULL DEFAULT '[]'",
+    platforms: "TEXT NOT NULL DEFAULT '[]'",
+    steam_type: 'TEXT',
+    igdb_game_type: 'TEXT',
+    application_type: "TEXT NOT NULL DEFAULT 'unknown'",
+    classification_source: 'TEXT',
+    classification_reason: 'TEXT',
+    classification_confidence: "TEXT NOT NULL DEFAULT 'low'",
     metadata_status: "TEXT NOT NULL DEFAULT 'pending'",
     metadata_error: 'TEXT',
     metadata_attempts: 'INTEGER NOT NULL DEFAULT 0',
     metadata_updated_at: 'TEXT',
     next_retry_at: 'TEXT',
     metadata_source: 'TEXT',
+    metadata_sources: "TEXT NOT NULL DEFAULT '[]'",
     metadata_provider_id: 'TEXT',
+    igdb_provider_id: 'TEXT',
     metadata_cover_url: 'TEXT',
     source_steamid: 'TEXT',
     last_seen_at: 'TEXT',
@@ -126,12 +224,28 @@ function initializeDatabase(db) {
   for (const [column, definition] of Object.entries(additions)) {
     if (!existing.has(column)) db.exec(`ALTER TABLE games ADD COLUMN ${column} ${definition}`);
   }
+  const cacheColumns = new Set(db.prepare('PRAGMA table_info(metadata_cache)').all().map((row) => row.name));
+  const cacheAdditions = {
+    themes: "TEXT NOT NULL DEFAULT '[]'",
+    platforms: "TEXT NOT NULL DEFAULT '[]'",
+    game_type: 'TEXT'
+  };
+  for (const [column, definition] of Object.entries(cacheAdditions)) {
+    if (!cacheColumns.has(column)) db.exec(`ALTER TABLE metadata_cache ADD COLUMN ${column} ${definition}`);
+  }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_games_metadata_status ON games(metadata_status, next_retry_at);
     CREATE INDEX IF NOT EXISTS idx_games_name ON games(name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_metadata_cache_expiry ON metadata_cache(provider, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_games_application_type ON games(application_type);
     UPDATE games SET metadata_status = 'pending' WHERE metadata_status = 'syncing';
     UPDATE games SET genres = '[]' WHERE genres IS NULL OR genres = '';
+    UPDATE games SET themes = '[]' WHERE themes IS NULL OR themes = '';
+    UPDATE games SET platforms = '[]' WHERE platforms IS NULL OR platforms = '';
+    UPDATE games SET metadata_sources = CASE
+      WHEN metadata_sources IS NULL OR metadata_sources = '' OR metadata_sources = '[]'
+        THEN CASE WHEN metadata_source IS NULL OR metadata_source = '' THEN '[]' ELSE '["' || metadata_source || '"]' END
+      ELSE metadata_sources END;
   `);
   if (migratingFromPre061) {
     db.exec(`
@@ -140,6 +254,10 @@ function initializeDatabase(db) {
       UPDATE games SET metadata_status = 'pending', metadata_error = NULL
         WHERE metadata_status = 'unavailable' AND (metadata_source IS NULL OR metadata_source = '');
     `);
+  }
+  if (migratingFromPre07) {
+    db.exec(`UPDATE games SET metadata_status = 'pending', metadata_error = NULL, next_retry_at = NULL
+      WHERE metadata_status IN ('synced', 'unavailable')`);
   }
 }
 
@@ -295,6 +413,27 @@ function createApplication(options = {}) {
   const db = new DatabaseSync(dbPath);
   initializeDatabase(db);
   const settings = createSettingsStore(db);
+  const classificationUpdate = db.prepare(`UPDATE games SET application_type = ?, classification_source = ?,
+    classification_reason = ?, classification_confidence = ?, updated_at = ? WHERE appid = ?`);
+  const manualOverrideLookup = db.prepare('SELECT * FROM game_manual_overrides WHERE appid = ?');
+  const igdbManualLookup = db.prepare('SELECT igdb_game_id, status, updated_at FROM igdb_manual_matches WHERE appid = ?');
+
+  function persistClassification(appid, metadata) {
+    const result = classifyApplication(metadata);
+    classificationUpdate.run(result.applicationType, result.source, result.reason, result.confidence, nowIso(), Number(appid));
+    return result;
+  }
+
+  const needsClassification = db.prepare(`SELECT appid, name, steam_type, igdb_game_type FROM games
+    WHERE application_type IS NULL OR application_type = '' OR application_type = 'unknown'`).all();
+  for (const row of needsClassification) {
+    persistClassification(row.appid, {
+      name: row.name,
+      steamType: row.steam_type,
+      igdbType: row.igdb_game_type,
+      ownedGame: true
+    });
+  }
 
   const job = {
     running: false,
@@ -315,12 +454,15 @@ function createApplication(options = {}) {
   const cacheLookup = db.prepare(`SELECT * FROM metadata_cache
     WHERE provider = ? AND external_id = ? AND expires_at > ?`);
   const cacheUpsert = db.prepare(`
-    INSERT INTO metadata_cache(provider, external_id, provider_id, name, genres, cover_url, found, fetched_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO metadata_cache(provider, external_id, provider_id, name, genres, themes, platforms, game_type, cover_url, found, fetched_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider, external_id) DO UPDATE SET
       provider_id = excluded.provider_id,
       name = excluded.name,
       genres = excluded.genres,
+      themes = excluded.themes,
+      platforms = excluded.platforms,
+      game_type = excluded.game_type,
       cover_url = excluded.cover_url,
       found = excluded.found,
       fetched_at = excluded.fetched_at,
@@ -342,6 +484,9 @@ function createApplication(options = {}) {
       providerId: row.provider_id || null,
       name: row.name || '',
       genres: safeJsonParse(row.genres, []),
+      themes: safeJsonParse(row.themes, []),
+      platforms: safeJsonParse(row.platforms, []),
+      gameType: row.game_type || null,
       coverUrl: row.cover_url || null
     };
   }
@@ -416,11 +561,21 @@ function createApplication(options = {}) {
         const genres = found && Array.isArray(game.genres)
           ? [...new Set(game.genres.map((genre) => String(genre?.name || '').trim()).filter(Boolean))]
           : [];
+        const themes = found && Array.isArray(game.themes)
+          ? [...new Set(game.themes.map((theme) => String(theme?.name || '').trim()).filter(Boolean))]
+          : [];
+        const platforms = found && Array.isArray(game.platforms)
+          ? [...new Set(game.platforms.map((platform) => String(platform?.name || '').trim()).filter(Boolean))]
+          : [];
+        const gameType = found
+          ? String(game.game_type?.type || game.game_type?.name || game.game_type || game.category || '').trim()
+          : '';
         const expiresAt = new Date(Date.now() + (found ? igdbCacheTtlHours : igdbMissCacheTtlHours) * 3_600_000).toISOString();
         cacheUpsert.run(
           'igdb', String(appid), found ? String(game.id || '') : null,
           found ? String(game.name || '').slice(0, 300) : null,
-          JSON.stringify(genres), found ? normalizeIgdbCover(game.cover?.url) : null,
+          JSON.stringify(genres), JSON.stringify(themes), JSON.stringify(platforms), gameType || null,
+          found ? normalizeIgdbCover(game.cover?.url) : null,
           found ? 1 : 0, fetchedAt, expiresAt
         );
       }
@@ -434,17 +589,26 @@ function createApplication(options = {}) {
     try { sourceId = await resolveIgdbSteamSourceId(); } catch (error) {
       if ([401, 403, 429].includes(error.upstreamStatus)) throw error;
     }
-    const fields = 'fields uid,game.id,game.name,game.genres.name,game.cover.url;';
+    const modernFields = 'fields uid,game.id,game.name,game.genres.name,game.themes.name,game.platforms.name,game.game_type.type,game.category,game.cover.url;';
+    const legacyFields = 'fields uid,game.id,game.name,game.genres.name,game.themes.name,game.platforms.name,game.category,game.cover.url;';
+    const queryExternalGames = async (filter) => {
+      try {
+        return await igdbQuery('external_games', `${modernFields} where ${filter}; limit ${appids.length};`);
+      } catch (error) {
+        if (error.upstreamStatus !== 400) throw error;
+        return igdbQuery('external_games', `${legacyFields} where ${filter}; limit ${appids.length};`);
+      }
+    };
     let records;
     if (sourceId) {
       try {
-        records = await igdbQuery('external_games', `${fields} where external_game_source = ${sourceId} & uid = (${quoted}); limit ${appids.length};`);
+        records = await queryExternalGames(`external_game_source = ${sourceId} & uid = (${quoted})`);
       } catch (error) {
         if (error.upstreamStatus !== 400) throw error;
       }
     }
     if (!records) {
-      records = await igdbQuery('external_games', `${fields} where category = 1 & uid = (${quoted}); limit ${appids.length};`);
+      records = await queryExternalGames(`category = 1 & uid = (${quoted})`);
     }
     return cacheIgdbBatch(appids, records);
   }
@@ -469,24 +633,204 @@ function createApplication(options = {}) {
     }
   }
 
-  function publicGame(row) {
+  function publicGame(row, manualOverride, manualMatch) {
+    const manual = manualOverride === undefined ? manualOverrideLookup.get(Number(row.appid)) : manualOverride;
+    const igdbManualMatch = manualMatch === undefined ? igdbManualLookup.get(Number(row.appid)) : manualMatch;
+    const sourceGenres = safeJsonParse(row.genres, []);
+    const sourceThemes = safeJsonParse(row.themes, []);
+    const sourcePlatforms = safeJsonParse(row.platforms, []);
+    const manualFields = manual ? ['display_name', 'application_type', 'genres', 'themes', 'platforms']
+      .filter((field) => manual[field] != null) : [];
     return {
       appid: Number(row.appid),
-      name: row.name || `App ${row.appid}`,
+      name: manual?.display_name || row.name || `App ${row.appid}`,
+      source_name: row.name || `App ${row.appid}`,
       playtime_forever: Number(row.playtime_forever || 0),
       playtime_windows_forever: Number(row.playtime_windows_forever || 0),
       playtime_mac_forever: Number(row.playtime_mac_forever || 0),
       playtime_linux_forever: Number(row.playtime_linux_forever || 0),
       rtime_last_played: Number(row.rtime_last_played || 0),
       img_icon_url: row.img_icon_url || '',
-      genres: safeJsonParse(row.genres, []),
+      genres: manual?.genres != null ? safeJsonParse(manual.genres, []) : sourceGenres,
+      themes: manual?.themes != null ? safeJsonParse(manual.themes, []) : sourceThemes,
+      platforms: manual?.platforms != null ? safeJsonParse(manual.platforms, []) : sourcePlatforms,
+      application_type: manual?.application_type || (APPLICATION_TYPES.includes(row.application_type) ? row.application_type : 'unknown'),
+      source_application_type: APPLICATION_TYPES.includes(row.application_type) ? row.application_type : 'unknown',
+      classification_source: row.classification_source || null,
+      classification_reason: row.classification_reason || null,
+      classification_confidence: row.classification_confidence || 'low',
       metadata_status: STATUS_VALUES.includes(row.metadata_status) ? row.metadata_status : 'pending',
       metadata_error: row.metadata_error || null,
       metadata_updated_at: row.metadata_updated_at || null,
       metadata_source: row.metadata_source || null,
+      metadata_sources: safeJsonParse(row.metadata_sources, row.metadata_source ? [row.metadata_source] : []),
       metadata_provider_id: row.metadata_provider_id || null,
+      igdb_provider_id: row.igdb_provider_id || null,
+      manual_override: Boolean(manualFields.length),
+      manual_fields: manualFields,
+      manual_updated_at: manual?.updated_at || null,
+      source_values: {
+        name: row.name || `App ${row.appid}`,
+        application_type: APPLICATION_TYPES.includes(row.application_type) ? row.application_type : 'unknown',
+        genres: sourceGenres,
+        themes: sourceThemes,
+        platforms: sourcePlatforms
+      },
+      igdb_manual_match: igdbManualMatch || { status: 'unmatched' },
       header_image: row.metadata_cover_url || `https://cdn.cloudflare.steamstatic.com/steam/apps/${Number(row.appid)}/header.jpg`
     };
+  }
+
+  function allPublicGames() {
+    const overrides = new Map(db.prepare('SELECT * FROM game_manual_overrides').all().map((row) => [Number(row.appid), row]));
+    const matches = new Map(db.prepare('SELECT appid, igdb_game_id, status, updated_at FROM igdb_manual_matches').all().map((row) => [Number(row.appid), row]));
+    return db.prepare('SELECT * FROM games ORDER BY name COLLATE NOCASE, appid').all()
+      .map((row) => publicGame(row, overrides.get(Number(row.appid)) || null, matches.get(Number(row.appid)) || null));
+  }
+
+  function gameByAppid(appid) {
+    const row = db.prepare('SELECT * FROM games WHERE appid = ?').get(Number(appid));
+    if (!row) throw new HttpError(404, 'Jeu introuvable dans la bibliothèque.', 'game_not_found');
+    return publicGame(row);
+  }
+
+  function affinityProfile(games) {
+    const profile = { genres: new Map(), themes: new Map(), platforms: new Map(), playedGames: 0, totalMinutes: 0 };
+    for (const game of games) {
+      if (game.playtime_forever <= 0 || NON_RECOMMENDABLE_TYPES.has(game.application_type)) continue;
+      const weight = 1 + Math.min(6, Math.log2(1 + game.playtime_forever / 60));
+      profile.playedGames += 1;
+      profile.totalMinutes += game.playtime_forever;
+      for (const [key, values] of [['genres', game.genres], ['themes', game.themes], ['platforms', game.platforms]]) {
+        for (const value of values || []) profile[key].set(value, (profile[key].get(value) || 0) + weight);
+      }
+    }
+    return profile;
+  }
+
+  function normalizedAffinity(map, values, cap) {
+    if (!map.size || !values?.length) return { points: 0, matches: [] };
+    const max = Math.max(...map.values());
+    const matches = values.filter((value) => map.has(value)).sort((a, b) => map.get(b) - map.get(a) || a.localeCompare(b, 'fr'));
+    const ratio = matches.slice(0, 3).reduce((sum, value) => sum + map.get(value) / max, 0) / 3;
+    return { points: Math.min(cap, ratio * cap), matches };
+  }
+
+  function buildRecommendations({ limit = 12, includeNonGames = false, includePlayed = false } = {}) {
+    const games = allPublicGames();
+    const profile = affinityProfile(games);
+    const suggestions = [];
+    for (const game of games) {
+      if (!includePlayed && game.playtime_forever > 0) continue;
+      if (!includeNonGames && game.application_type !== 'full_game') continue;
+      if (includeNonGames && NON_RECOMMENDABLE_TYPES.has(game.application_type)) {
+        // Explicit opt-in: keep the entry visible but apply a strong penalty.
+      } else if (NON_RECOMMENDABLE_TYPES.has(game.application_type)) continue;
+      if (!['synced', 'temporary_error'].includes(game.metadata_status) || !game.metadata_source) continue;
+
+      const genre = normalizedAffinity(profile.genres, game.genres, 42);
+      const theme = normalizedAffinity(profile.themes, game.themes, 20);
+      const platform = normalizedAffinity(profile.platforms, game.platforms, 10);
+      const factors = {
+        neverPlayed: game.playtime_forever === 0 ? 18 : 0,
+        fullGame: game.application_type === 'full_game' ? 8 : -35,
+        genres: genre.points,
+        themes: theme.points,
+        platforms: platform.points,
+        source: game.metadata_source === 'steam_store' ? 4 : 2,
+        completeness: Math.min(5, (game.genres.length ? 2 : 0) + (game.themes.length ? 2 : 0) + (game.platforms.length ? 1 : 0))
+      };
+      const score = Math.round(Object.values(factors).reduce((sum, value) => sum + value, 0) * 10) / 10;
+      const reasons = [];
+      if (game.playtime_forever === 0) reasons.push('Jamais lancé : priorité à la découverte.');
+      if (genre.matches.length) reasons.push(`Genres proches de tes habitudes : ${genre.matches.slice(0, 3).join(', ')}.`);
+      if (theme.matches.length) reasons.push(`Thèmes appréciés : ${theme.matches.slice(0, 2).join(', ')}.`);
+      if (platform.matches.length) reasons.push(`Plateformes cohérentes avec ton historique : ${platform.matches.slice(0, 2).join(', ')}.`);
+      if (!genre.matches.length && !theme.matches.length && profile.playedGames === 0) reasons.push('Suggestion de démarrage fondée sur les métadonnées disponibles.');
+      reasons.push(`Type : ${game.application_type}; source : ${game.metadata_source}.`);
+      suggestions.push({ ...game, recommendation_score: score, recommendation_reasons: reasons, recommendation_factors: factors });
+    }
+    suggestions.sort((a, b) => b.recommendation_score - a.recommendation_score || a.name.localeCompare(b.name, 'fr') || a.appid - b.appid);
+    const selected = suggestions.slice(0, limit);
+    const generatedAt = nowIso();
+    transaction(db, () => {
+      db.prepare('DELETE FROM recommendation_cache').run();
+      const insert = db.prepare(`INSERT INTO recommendation_cache(appid, algorithm_version, score, reasons, factors, generated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+      for (const game of selected) insert.run(game.appid, RECOMMENDATION_ALGORITHM, game.recommendation_score,
+        JSON.stringify(game.recommendation_reasons), JSON.stringify(game.recommendation_factors), generatedAt);
+    });
+    return {
+      algorithm: RECOMMENDATION_ALGORITHM,
+      generatedAt,
+      deterministic: true,
+      filters: { includeNonGames, includePlayed },
+      profile: {
+        playedGames: profile.playedGames,
+        totalHours: Math.round((profile.totalMinutes / 60) * 10) / 10,
+        topGenres: [...profile.genres.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr')).slice(0, 5).map(([name]) => name),
+        topThemes: [...profile.themes.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr')).slice(0, 5).map(([name]) => name)
+      },
+      suggestions: selected
+    };
+  }
+
+  function validateStringList(value, field) {
+    if (value === null) return null;
+    if (!Array.isArray(value) || value.length > 30) throw new HttpError(400, `${field} doit être une liste de 30 valeurs maximum.`, 'invalid_manual_field');
+    if (value.some((item) => typeof item !== 'string')) throw new HttpError(400, `${field} doit contenir uniquement du texte.`, 'invalid_manual_field');
+    const values = uniqueStrings(value);
+    if (values.length !== value.length || values.some((item) => item.length > 80)) {
+      throw new HttpError(400, `${field} contient une valeur vide, dupliquée ou trop longue.`, 'invalid_manual_field');
+    }
+    return values;
+  }
+
+  function validateManualOverride(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Correction manuelle invalide.', 'invalid_manual_fields');
+    const allowed = new Set(['display_name', 'application_type', 'genres', 'themes', 'platforms']);
+    const keys = Object.keys(body || {});
+    if (!keys.length || keys.some((key) => !allowed.has(key))) throw new HttpError(400, 'Champs de correction manuelle invalides.', 'invalid_manual_fields');
+    const result = {};
+    if ('display_name' in body) {
+      if (body.display_name === null) result.display_name = null;
+      else {
+        if (typeof body.display_name !== 'string') throw new HttpError(400, 'Le titre doit être du texte.', 'invalid_display_name');
+        const value = body.display_name.trim();
+        if (!value || value.length > 300) throw new HttpError(400, 'Le titre doit contenir entre 1 et 300 caractères.', 'invalid_display_name');
+        result.display_name = value;
+      }
+    }
+    if ('application_type' in body) {
+      if (body.application_type === null) result.application_type = null;
+      else if (typeof body.application_type !== 'string' || !APPLICATION_TYPES.includes(body.application_type)) throw new HttpError(400, 'Type d’application invalide.', 'invalid_application_type');
+      else result.application_type = body.application_type;
+    }
+    for (const field of ['genres', 'themes', 'platforms']) if (field in body) result[field] = validateStringList(body[field], field);
+    return result;
+  }
+
+  function saveManualOverride(appid, patch) {
+    gameByAppid(appid);
+    const current = manualOverrideLookup.get(Number(appid)) || {};
+    const merged = {
+      display_name: 'display_name' in patch ? patch.display_name : current.display_name ?? null,
+      application_type: 'application_type' in patch ? patch.application_type : current.application_type ?? null,
+      genres: 'genres' in patch ? patch.genres : (current.genres == null ? null : safeJsonParse(current.genres, [])),
+      themes: 'themes' in patch ? patch.themes : (current.themes == null ? null : safeJsonParse(current.themes, [])),
+      platforms: 'platforms' in patch ? patch.platforms : (current.platforms == null ? null : safeJsonParse(current.platforms, []))
+    };
+    if (Object.values(merged).every((value) => value == null)) db.prepare('DELETE FROM game_manual_overrides WHERE appid = ?').run(Number(appid));
+    else db.prepare(`INSERT INTO game_manual_overrides(appid, display_name, application_type, genres, themes, platforms, updated_at, updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'admin')
+      ON CONFLICT(appid) DO UPDATE SET display_name = excluded.display_name, application_type = excluded.application_type,
+        genres = excluded.genres, themes = excluded.themes, platforms = excluded.platforms,
+        updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+      .run(Number(appid), merged.display_name, merged.application_type,
+        merged.genres == null ? null : JSON.stringify(merged.genres),
+        merged.themes == null ? null : JSON.stringify(merged.themes),
+        merged.platforms == null ? null : JSON.stringify(merged.platforms), nowIso());
+    return gameByAppid(appid);
   }
 
   function statusSnapshot() {
@@ -539,8 +883,9 @@ function createApplication(options = {}) {
     INSERT INTO games (
       appid, name, playtime_forever, playtime_windows_forever, playtime_mac_forever,
       playtime_linux_forever, rtime_last_played, img_icon_url, genres, metadata_status,
+      application_type, classification_source, classification_reason, classification_confidence,
       source_steamid, last_seen_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(appid) DO UPDATE SET
       name = excluded.name,
       playtime_forever = excluded.playtime_forever,
@@ -549,6 +894,10 @@ function createApplication(options = {}) {
       playtime_linux_forever = excluded.playtime_linux_forever,
       rtime_last_played = excluded.rtime_last_played,
       img_icon_url = excluded.img_icon_url,
+      application_type = CASE WHEN games.steam_type IS NULL AND games.igdb_game_type IS NULL THEN excluded.application_type ELSE games.application_type END,
+      classification_source = CASE WHEN games.steam_type IS NULL AND games.igdb_game_type IS NULL THEN excluded.classification_source ELSE games.classification_source END,
+      classification_reason = CASE WHEN games.steam_type IS NULL AND games.igdb_game_type IS NULL THEN excluded.classification_reason ELSE games.classification_reason END,
+      classification_confidence = CASE WHEN games.steam_type IS NULL AND games.igdb_game_type IS NULL THEN excluded.classification_confidence ELSE games.classification_confidence END,
       source_steamid = excluded.source_steamid,
       last_seen_at = excluded.last_seen_at,
       updated_at = excluded.updated_at
@@ -558,11 +907,13 @@ function createApplication(options = {}) {
     transaction(db, () => {
       const timestamp = nowIso();
       for (const game of games) {
+        const classification = classifyApplication({ name: game.name, ownedGame: true });
         upsertGame.run(
           Number(game.appid), String(game.name || `App ${game.appid}`).slice(0, 300),
           Number(game.playtime_forever || 0), Number(game.playtime_windows_forever || 0),
           Number(game.playtime_mac_forever || 0), Number(game.playtime_linux_forever || 0),
           Number(game.rtime_last_played || 0), String(game.img_icon_url || '').slice(0, 200),
+          classification.applicationType, classification.source, classification.reason, classification.confidence,
           steamid, timestamp, timestamp, timestamp
         );
       }
@@ -598,14 +949,20 @@ function createApplication(options = {}) {
   function updateFromIgdb(appid, cache, options = {}) {
     const timestamp = nowIso();
     const status = options.status || 'synced';
-    db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = ?,
+    const classification = classifyApplication({ name: cache.name, igdbType: cache.gameType, ownedGame: true });
+    db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, themes = ?, platforms = ?,
+      igdb_game_type = ?, application_type = ?, classification_source = ?, classification_reason = ?,
+      classification_confidence = ?, metadata_status = ?,
       metadata_error = ?, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
-      next_retry_at = ?, metadata_source = 'igdb', metadata_provider_id = ?, metadata_cover_url = ?,
+      next_retry_at = ?, metadata_source = 'igdb', metadata_sources = '["igdb"]', metadata_provider_id = ?,
+      igdb_provider_id = ?, metadata_cover_url = ?,
       updated_at = ? WHERE appid = ?`)
       .run(
-        String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), status,
+        String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), JSON.stringify(cache.themes || []),
+        JSON.stringify(cache.platforms || []), String(cache.gameType || '').slice(0, 100),
+        classification.applicationType, classification.source, classification.reason, classification.confidence, status,
         options.error || null, timestamp, options.retryAt || null, cache.providerId,
-        cache.coverUrl, timestamp, appid
+        cache.providerId, cache.coverUrl, timestamp, appid
       );
   }
 
@@ -613,7 +970,7 @@ function createApplication(options = {}) {
     const timestamp = nowIso();
     db.prepare(`UPDATE games SET metadata_status = 'unavailable', metadata_error = ?,
       metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?, next_retry_at = NULL,
-      metadata_source = NULL, metadata_provider_id = NULL, metadata_cover_url = NULL,
+      metadata_source = NULL, metadata_sources = '[]', metadata_provider_id = NULL, igdb_provider_id = NULL, metadata_cover_url = NULL,
       updated_at = ? WHERE appid = ?`)
       .run('Aucune fiche Steam Store ni correspondance IGDB par AppID.', timestamp, timestamp, appid);
   }
@@ -628,11 +985,18 @@ function createApplication(options = {}) {
       ? `${String(error.message || 'Steam Store temporairement indisponible')} Données IGDB affichées en attendant le réessai Steam.`
       : String(error.message || 'Erreur temporaire');
     if (cache?.found) {
-      db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = 'temporary_error',
+      const classification = classifyApplication({ name: cache.name, igdbType: cache.gameType, ownedGame: true });
+      db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, themes = ?, platforms = ?,
+        igdb_game_type = ?, application_type = ?, classification_source = ?, classification_reason = ?,
+        classification_confidence = ?, metadata_status = 'temporary_error',
         metadata_error = ?, metadata_attempts = ?, metadata_updated_at = ?, next_retry_at = ?,
-        metadata_source = 'igdb', metadata_provider_id = ?, metadata_cover_url = ?, updated_at = ? WHERE appid = ?`)
-        .run(String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), message.slice(0, 500),
-          attempts, timestamp, retryAt, cache.providerId, cache.coverUrl, timestamp, appid);
+        metadata_source = 'igdb', metadata_sources = '["igdb"]', metadata_provider_id = ?, igdb_provider_id = ?,
+        metadata_cover_url = ?, updated_at = ? WHERE appid = ?`)
+        .run(String(cache.name || '').slice(0, 300), JSON.stringify(cache.genres || []), JSON.stringify(cache.themes || []),
+          JSON.stringify(cache.platforms || []), String(cache.gameType || '').slice(0, 100),
+          classification.applicationType, classification.source, classification.reason, classification.confidence,
+          message.slice(0, 500), attempts, timestamp, retryAt, cache.providerId, cache.providerId,
+          cache.coverUrl, timestamp, appid);
     } else {
       db.prepare(`UPDATE games SET metadata_status = 'temporary_error', metadata_error = ?, metadata_attempts = ?,
         metadata_updated_at = ?, next_retry_at = ?, updated_at = ? WHERE appid = ?`)
@@ -661,12 +1025,32 @@ function createApplication(options = {}) {
       const genres = Array.isArray(entry.data.genres)
         ? [...new Set(entry.data.genres.map((genre) => String(genre.description || '').trim()).filter(Boolean))]
         : [];
+      const cache = getCachedIgdb(appid);
+      const themes = cache?.found ? cache.themes : [];
+      const steamPlatforms = Object.entries(entry.data.platforms || {}).filter(([, supported]) => Boolean(supported)).map(([platform]) => platform);
+      const platforms = steamPlatforms.length ? steamPlatforms : (cache?.found ? cache.platforms : []);
+      const steamType = String(entry.data.type || '').slice(0, 100);
+      const categories = Array.isArray(entry.data.categories) ? entry.data.categories.map((category) => category.description) : [];
+      const classification = classifyApplication({
+        name: entry.data.name,
+        steamType,
+        igdbType: cache?.gameType,
+        categories,
+        ownedGame: true
+      });
       const timestamp = nowIso();
-      db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, metadata_status = 'synced',
+      db.prepare(`UPDATE games SET name = COALESCE(NULLIF(?, ''), name), genres = ?, themes = ?, platforms = ?,
+        steam_type = ?, igdb_game_type = ?, application_type = ?, classification_source = ?, classification_reason = ?,
+        classification_confidence = ?, metadata_status = 'synced',
         metadata_error = NULL, metadata_attempts = metadata_attempts + 1, metadata_updated_at = ?,
-        next_retry_at = NULL, metadata_source = 'steam_store', metadata_provider_id = ?, metadata_cover_url = NULL,
+        next_retry_at = NULL, metadata_source = 'steam_store', metadata_sources = ?, metadata_provider_id = ?,
+        igdb_provider_id = ?, metadata_cover_url = NULL,
         updated_at = ? WHERE appid = ?`)
-        .run(String(entry.data.name || '').slice(0, 300), JSON.stringify(genres), timestamp, String(appid), timestamp, appid);
+        .run(String(entry.data.name || '').slice(0, 300), JSON.stringify(genres), JSON.stringify(themes), JSON.stringify(platforms),
+          steamType, String(cache?.gameType || '').slice(0, 100), classification.applicationType, classification.source,
+          classification.reason, classification.confidence, timestamp,
+          JSON.stringify(cache?.found ? ['steam_store', 'igdb'] : ['steam_store']), String(appid), cache?.providerId || null,
+          timestamp, appid);
       return 0;
     } catch (error) {
       return markTemporaryError(row, error, getCachedIgdb(appid));
@@ -764,6 +1148,8 @@ function createApplication(options = {}) {
         igdbConfigured,
         adminConfigured: Boolean(adminToken),
         metadataConcurrency,
+        manualIgdbMatchPrepared: true,
+        recommendationAlgorithm: RECOMMENDATION_ALGORITHM,
         activeSteamId: settings.get('active_steamid'),
         activeProfileName: settings.get('active_profile_name'),
         lastLibrarySyncAt: settings.get('last_library_sync_at'),
@@ -771,14 +1157,43 @@ function createApplication(options = {}) {
       });
     }
     if (req.method === 'GET' && pathname === '/api/library') {
-      const games = db.prepare('SELECT * FROM games ORDER BY name COLLATE NOCASE, appid').all().map(publicGame);
+      const games = allPublicGames();
       const totalMinutes = games.reduce((sum, game) => sum + game.playtime_forever, 0);
       const neverPlayed = games.filter((game) => game.playtime_forever === 0).length;
+      const technical = games.filter((game) => NON_RECOMMENDABLE_TYPES.has(game.application_type)).length;
       return sendJson(res, 200, {
         games,
-        stats: { total: games.length, neverPlayed, played: games.length - neverPlayed, totalHours: Math.round((totalMinutes / 60) * 10) / 10 },
+        stats: { total: games.length, neverPlayed, played: games.length - neverPlayed, technical, totalHours: Math.round((totalMinutes / 60) * 10) / 10 },
         profile: { steamid: settings.get('active_steamid'), name: settings.get('active_profile_name'), lastSyncAt: settings.get('last_library_sync_at') }
       });
+    }
+    if (req.method === 'GET' && pathname === '/api/recommendations') {
+      const limitValue = url.searchParams.get('limit');
+      const limit = limitValue == null ? 12 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 24) throw new HttpError(400, 'La limite doit être comprise entre 1 et 24.', 'invalid_limit');
+      for (const key of ['includeNonGames', 'includePlayed']) {
+        const value = url.searchParams.get(key);
+        if (value != null && !['0', '1'].includes(value)) throw new HttpError(400, `${key} doit valoir 0 ou 1.`, 'invalid_filter');
+      }
+      return sendJson(res, 200, buildRecommendations({
+        limit,
+        includeNonGames: url.searchParams.get('includeNonGames') === '1',
+        includePlayed: url.searchParams.get('includePlayed') === '1'
+      }));
+    }
+    const gameRoute = pathname.match(/^\/api\/games\/(\d{1,10})$/);
+    if (req.method === 'GET' && gameRoute) return sendJson(res, 200, { game: gameByAppid(gameRoute[1]) });
+    const manualRoute = pathname.match(/^\/api\/games\/(\d{1,10})\/manual$/);
+    if (req.method === 'PATCH' && manualRoute) {
+      requireAdmin(req);
+      const patch = validateManualOverride(await readJson(req));
+      return sendJson(res, 200, { game: saveManualOverride(manualRoute[1], patch) });
+    }
+    if (req.method === 'DELETE' && manualRoute) {
+      requireAdmin(req);
+      gameByAppid(manualRoute[1]);
+      db.prepare('DELETE FROM game_manual_overrides WHERE appid = ?').run(Number(manualRoute[1]));
+      return sendJson(res, 200, { game: gameByAppid(manualRoute[1]) });
     }
     if (req.method === 'GET' && pathname === '/api/enrichment/status') return sendJson(res, 200, statusSnapshot());
     if (req.method === 'GET' && pathname === '/api/sync/history') {
@@ -819,10 +1234,14 @@ function createApplication(options = {}) {
       const backup = createBackup(scope);
       let affected = 0;
       if (scope === 'metadata') {
-        affected = Number(db.prepare(`UPDATE games SET genres = '[]', metadata_status = 'pending', metadata_error = NULL,
-          metadata_attempts = 0, metadata_updated_at = NULL, next_retry_at = NULL, metadata_source = NULL,
-          metadata_provider_id = NULL, metadata_cover_url = NULL, updated_at = ?`).run(nowIso()).changes);
+        affected = Number(db.prepare(`UPDATE games SET genres = '[]', themes = '[]', platforms = '[]', steam_type = NULL,
+          igdb_game_type = NULL, application_type = 'full_game', classification_source = 'steam_library',
+          classification_reason = 'Entrée de bibliothèque Steam sans signal contraire.', classification_confidence = 'low',
+          metadata_status = 'pending', metadata_error = NULL, metadata_attempts = 0, metadata_updated_at = NULL,
+          next_retry_at = NULL, metadata_source = NULL, metadata_sources = '[]', metadata_provider_id = NULL,
+          igdb_provider_id = NULL, metadata_cover_url = NULL, updated_at = ?`).run(nowIso()).changes);
         db.prepare('DELETE FROM metadata_cache').run();
+        db.prepare('DELETE FROM recommendation_cache').run();
       } else if (scope === 'library') {
         affected = Number(db.prepare('DELETE FROM games').run().changes);
         for (const key of ['active_steamid', 'active_profile_name', 'last_library_sync_at', 'last_library_sync_count']) settings.remove(key);
@@ -830,6 +1249,7 @@ function createApplication(options = {}) {
         affected = transaction(db, () => {
           const count = Number(db.prepare('DELETE FROM games').run().changes);
           db.prepare('DELETE FROM metadata_cache').run();
+          db.prepare('DELETE FROM recommendation_cache').run();
           db.prepare('DELETE FROM sync_runs').run();
           db.prepare('DELETE FROM settings').run();
           return count;
@@ -884,4 +1304,4 @@ if (require.main === module) {
   process.on('SIGINT', shutdown);
 }
 
-module.exports = { createApplication, normalizeProfileInput, VERSION };
+module.exports = { createApplication, normalizeProfileInput, classifyApplication, APPLICATION_TYPES, VERSION };

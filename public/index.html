@@ -12,7 +12,7 @@
   <main class="shell">
     <header class="hero">
       <div>
-        <h1><span aria-hidden="true">🎮</span> Backlog <span class="version">v0.6.1</span></h1>
+        <h1><span aria-hidden="true">🎮</span> Backlog <span class="version">v0.7.0</span></h1>
         <p>Ta bibliothèque Steam, synchronisée depuis un profil public et enrichie progressivement.</p>
       </div>
       <div id="serviceState" class="service-state">Connexion…</div>
@@ -78,8 +78,24 @@
         <span class="legend-item"><i class="dot dot-syncing"></i><b id="countSyncing">0</b> en cours</span>
         <span class="legend-item"><i class="dot dot-synced"></i><b id="countSynced">0</b> synchronisés</span>
         <span class="legend-item"><i class="dot dot-error"></i><b id="countErrors">0</b> erreurs temporaires</span>
-        <span class="legend-item"><i class="dot dot-unavailable"></i><b id="countUnavailable">0</b> indisponibles</span>
+        <span class="legend-item"><i class="dot dot-unavailable"></i><b id="countUnavailable">0</b> métadonnées introuvables</span>
       </div>
+    </section>
+
+    <section class="panel recommendation-panel" aria-labelledby="recommendationTitle">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Moteur explicable</span>
+          <h2 id="recommendationTitle">Recommandations pour ta bibliothèque</h2>
+        </div>
+        <div class="button-row recommendation-controls">
+          <label class="compact-option"><input id="includePlayedRecommendations" type="checkbox"> Inclure les jeux déjà lancés</label>
+          <label class="compact-option"><input id="includeTechnicalRecommendations" type="checkbox"> Inclure les autres types</label>
+          <button id="refreshRecommendations" class="button button-secondary" type="button">Actualiser</button>
+        </div>
+      </div>
+      <p id="recommendationSummary" class="help">Les suggestions sont calculées sans hasard à partir de tes jeux, temps de jeu et métadonnées.</p>
+      <div id="recommendationGrid" class="recommendation-grid" aria-live="polite"></div>
     </section>
 
     <section class="panel library-panel" aria-labelledby="libraryTitle">
@@ -90,7 +106,8 @@
           <input id="searchInput" type="search" placeholder="Rechercher un jeu…">
         </label>
         <label><span class="sr-only">État de lecture</span><select id="playFilter"><option value="all">Tous les jeux</option><option value="unplayed">Jamais lancés</option><option value="played">Déjà lancés</option></select></label>
-        <label><span class="sr-only">État des métadonnées</span><select id="statusFilter"><option value="all">Tous les états</option><option value="pending">En attente</option><option value="syncing">En cours</option><option value="synced">Synchronisés</option><option value="temporary_error">Erreur temporaire</option><option value="unavailable">Indisponibles</option></select></label>
+        <label><span class="sr-only">État des métadonnées</span><select id="statusFilter"><option value="all">Tous les états</option><option value="pending">En attente</option><option value="syncing">En cours</option><option value="synced">Synchronisés</option><option value="temporary_error">Erreur temporaire</option><option value="unavailable">Métadonnées introuvables</option></select></label>
+        <label><span class="sr-only">Type d’application</span><select id="appTypeFilter"><option value="all">Tous les types</option><option value="full_game">Jeux complets</option><option value="demo">Démos</option><option value="beta">Bêtas</option><option value="prototype">Prototypes</option><option value="public_test">Tests publics</option><option value="dedicated_server">Serveurs dédiés</option><option value="software_tool">Logiciels et outils</option><option value="dlc">DLC</option><option value="multiplayer_component">Composants multijoueur</option><option value="unknown">Type inconnu</option></select></label>
         <label><span class="sr-only">Genre</span><select id="genreFilter"><option value="all">Tous les genres</option></select></label>
         <label><span class="sr-only">Tri</span><select id="sortSelect"><option value="name-asc">Nom A → Z</option><option value="name-desc">Nom Z → A</option><option value="time-desc">Temps décroissant</option><option value="time-asc">Temps croissant</option><option value="recent-desc">Joué récemment</option></select></label>
         <label><span class="sr-only">Affichage</span><select id="viewSelect"><option value="grid">Jaquettes</option><option value="list">Liste</option></select></label>
@@ -109,6 +126,42 @@
       </div>
     </section>
   </main>
+
+  <dialog id="gameDialog" class="game-dialog">
+    <form method="dialog" id="gameDetailForm">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">Fiche détaillée</span>
+          <h2 id="detailTitle">Jeu</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="Fermer">×</button>
+      </div>
+      <div class="detail-layout">
+        <img id="detailCover" class="detail-cover" alt="">
+        <div class="detail-content">
+          <div id="detailOrigin" class="detail-origin"></div>
+          <dl id="detailFacts" class="detail-facts"></dl>
+          <p id="detailClassification" class="help"></p>
+          <p id="detailIgdbFuture" class="help"></p>
+        </div>
+      </div>
+      <fieldset class="manual-editor">
+        <legend>Correction manuelle</legend>
+        <p class="help">Ces valeurs ont priorité à l’affichage et dans les recommandations. Les valeurs Steam/IGDB d’origine restent conservées.</p>
+        <div class="editor-grid">
+          <label class="field field-wide"><span>Titre affiché</span><input id="editDisplayName" maxlength="300"></label>
+          <label class="field"><span>Type d’application</span><select id="editApplicationType"><option value="full_game">Jeu complet</option><option value="demo">Démo</option><option value="beta">Bêta</option><option value="prototype">Prototype</option><option value="public_test">Test public</option><option value="dedicated_server">Serveur dédié</option><option value="software_tool">Logiciel / outil</option><option value="dlc">DLC</option><option value="multiplayer_component">Composant multijoueur</option><option value="unknown">Type inconnu</option></select></label>
+          <label class="field"><span>Genres, séparés par des virgules</span><input id="editGenres"></label>
+          <label class="field"><span>Thèmes, séparés par des virgules</span><input id="editThemes"></label>
+          <label class="field"><span>Plateformes, séparées par des virgules</span><input id="editPlatforms"></label>
+        </div>
+        <div class="dialog-actions">
+          <button id="restoreSourceButton" class="button button-secondary" type="button">Rétablir les valeurs sources</button>
+          <button id="saveGameButton" class="button button-primary" type="button">Enregistrer la correction</button>
+        </div>
+      </fieldset>
+    </form>
+  </dialog>
 
   <dialog id="resetDialog" class="reset-dialog">
     <form method="dialog" id="resetForm">

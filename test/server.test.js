@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
-const { createApplication } = require('../server');
+const { createApplication, classifyApplication } = require('../server');
 
 function jsonResponse(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -34,6 +34,9 @@ function createMockSteam(options = {}) {
           id: Number(appid) + 10000,
           name: appid === '400' ? 'Portal IGDB' : 'Portal 2 IGDB',
           genres: [{ name: 'Puzzle' }],
+          themes: [{ name: 'Science fiction' }],
+          platforms: [{ name: 'PC (Microsoft Windows)' }],
+          game_type: { type: 'Main Game' },
           cover: { url: `//images.igdb.com/igdb/image/upload/t_thumb/cover-${appid}.jpg` }
         }
       })));
@@ -53,7 +56,11 @@ function createMockSteam(options = {}) {
     if (url.hostname === 'store.steampowered.com') {
       const appid = url.searchParams.get('appids');
       if (steamMissing.has(appid)) return jsonResponse({ [appid]: { success: false } });
-      return jsonResponse({ [appid]: { success: true, data: { name: appid === '400' ? 'Portal' : 'Portal 2', genres: [{ description: 'Action' }] } } });
+      return jsonResponse({ [appid]: { success: true, data: {
+        name: appid === '400' ? 'Portal' : 'Portal 2', type: 'game',
+        genres: [{ description: 'Action' }], platforms: { windows: true, mac: false, linux: true },
+        categories: [{ description: 'Single-player' }]
+      } } });
     }
     throw new Error(`Unexpected upstream URL: ${url}`);
   };
@@ -120,7 +127,7 @@ test('health and config do not expose secrets', async (t) => {
   await withServer(t, async ({ baseUrl }) => {
     const health = await api(baseUrl, '/healthz');
     assert.equal(health.response.status, 200);
-    assert.deepEqual(health.body, { status: 'ok', version: '0.6.1' });
+    assert.deepEqual(health.body, { status: 'ok', version: '0.7.0' });
 
     const config = await api(baseUrl, '/api/config');
     assert.equal(config.body.steamApiConfigured, true);
@@ -188,6 +195,113 @@ test('progressively enriches games and persists per-game status', async (t) => {
     assert.ok(library.body.games.every((game) => game.metadata_status === 'synced'));
     assert.ok(library.body.games.every((game) => game.metadata_source === 'steam_store'));
   });
+});
+
+test('classifies explicit Steam and metadata signals without approximate matching', () => {
+  assert.equal(classifyApplication({ name: 'Example', steamType: 'game' }).applicationType, 'full_game');
+  assert.equal(classifyApplication({ name: 'Example', steamType: 'dlc' }).applicationType, 'dlc');
+  assert.equal(classifyApplication({ name: 'Example Dedicated Server', steamType: 'game' }).applicationType, 'dedicated_server');
+  assert.equal(classifyApplication({ name: 'Example Playtest', ownedGame: true }).applicationType, 'public_test');
+  assert.equal(classifyApplication({ name: 'Example Demo', ownedGame: true }).applicationType, 'demo');
+  assert.equal(classifyApplication({ name: 'Example Beta', ownedGame: true }).applicationType, 'beta');
+  assert.equal(classifyApplication({ name: 'Example Prototype', ownedGame: true }).applicationType, 'prototype');
+  assert.equal(classifyApplication({ name: 'Example SDK', ownedGame: true }).applicationType, 'software_tool');
+  assert.equal(classifyApplication({ name: 'Example Multiplayer Component', ownedGame: true }).applicationType, 'multiplayer_component');
+});
+
+test('builds deterministic explainable recommendations and excludes technical entries by default', async (t) => {
+  await withServer(t, async ({ baseUrl, application }) => {
+    await importProfile(baseUrl);
+    await runEnrichment(baseUrl);
+    const first = await api(baseUrl, '/api/recommendations?limit=12');
+    const second = await api(baseUrl, '/api/recommendations?limit=12');
+    assert.equal(first.response.status, 200);
+    assert.equal(first.body.deterministic, true);
+    assert.deepEqual(first.body.suggestions.map(({ appid, recommendation_score }) => ({ appid, recommendation_score })),
+      second.body.suggestions.map(({ appid, recommendation_score }) => ({ appid, recommendation_score })));
+    assert.equal(first.body.suggestions[0].appid, 620);
+    assert.ok(first.body.suggestions[0].recommendation_reasons.some((reason) => reason.includes('Genres proches')));
+
+    application.db.prepare("UPDATE games SET application_type = 'software_tool' WHERE appid = 620").run();
+    const excluded = await api(baseUrl, '/api/recommendations?limit=12');
+    assert.equal(excluded.body.suggestions.length, 0);
+    const included = await api(baseUrl, '/api/recommendations?limit=12&includeNonGames=1');
+    assert.equal(included.body.suggestions[0].appid, 620);
+    assert.equal(included.body.suggestions[0].application_type, 'software_tool');
+    assert.equal(Number(application.db.prepare('SELECT COUNT(*) AS count FROM recommendation_cache').get().count), 1);
+  });
+});
+
+test('manual corrections are protected, validated, persisted separately, and restorable', async (t) => {
+  await withServer(t, async ({ baseUrl, application }) => {
+    await importProfile(baseUrl);
+    await runEnrichment(baseUrl);
+    const original = (await api(baseUrl, '/api/games/620')).body.game;
+
+    const rejected = await api(baseUrl, '/api/games/620/manual', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ display_name: 'Titre local' })
+    });
+    assert.equal(rejected.response.status, 401);
+    const invalid = await api(baseUrl, '/api/games/620/manual', {
+      method: 'PATCH', headers: { 'content-type': 'application/json', 'x-admin-token': 'secret-admin-token' },
+      body: JSON.stringify({ application_type: 'guess' })
+    });
+    assert.equal(invalid.response.status, 400);
+
+    const corrected = await api(baseUrl, '/api/games/620/manual', {
+      method: 'PATCH', headers: { 'content-type': 'application/json', 'x-admin-token': 'secret-admin-token' },
+      body: JSON.stringify({
+        display_name: 'Portal Two — local', application_type: 'prototype', genres: ['Puzzle local'],
+        themes: ['Science locale'], platforms: ['Linux']
+      })
+    });
+    assert.equal(corrected.response.status, 200);
+    assert.equal(corrected.body.game.name, 'Portal Two — local');
+    assert.equal(corrected.body.game.application_type, 'prototype');
+    assert.equal(corrected.body.game.manual_override, true);
+    assert.deepEqual(corrected.body.game.genres, ['Puzzle local']);
+    assert.equal(corrected.body.game.source_values.name, original.source_values.name);
+    assert.equal(application.db.prepare('SELECT name FROM games WHERE appid = 620').get().name, original.source_values.name);
+
+    application.db.prepare("UPDATE games SET metadata_status = 'pending' WHERE appid = 620").run();
+    await runEnrichment(baseUrl);
+    const afterRefresh = (await api(baseUrl, '/api/games/620')).body.game;
+    assert.equal(afterRefresh.name, 'Portal Two — local');
+    assert.equal(afterRefresh.source_values.name, 'Portal 2');
+
+    const restored = await api(baseUrl, '/api/games/620/manual', {
+      method: 'DELETE', headers: { 'x-admin-token': 'secret-admin-token' }
+    });
+    assert.equal(restored.body.game.manual_override, false);
+    assert.equal(restored.body.game.name, 'Portal 2');
+    assert.equal(restored.body.game.application_type, 'full_game');
+  });
+});
+
+test('detail payload exposes source values and a dormant manual IGDB match slot', async (t) => {
+  await withServer(t, async ({ baseUrl, application }) => {
+    await importProfile(baseUrl);
+    await runEnrichment(baseUrl);
+    const detail = await api(baseUrl, '/api/games/400');
+    assert.equal(detail.response.status, 200);
+    assert.deepEqual(detail.body.game.metadata_sources, ['steam_store', 'igdb']);
+    assert.deepEqual(detail.body.game.themes, ['Science fiction']);
+    assert.deepEqual(detail.body.game.platforms, ['windows', 'linux']);
+    assert.equal(detail.body.game.igdb_manual_match.status, 'unmatched');
+    assert.equal(Number(application.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'igdb_manual_matches'").get().count), 1);
+  });
+});
+
+test('validated UI keeps icon-only statuses accessible and exposes detail/type controls', () => {
+  const appSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  assert.match(appSource, /badge\.setAttribute\('aria-label'/);
+  assert.match(appSource, /accessible\.className = 'sr-only'/);
+  assert.match(appSource, /statusIcons/);
+  assert.match(html, /id="gameDialog"/);
+  assert.match(html, /id="appTypeFilter"/);
+  assert.match(html, /id="recommendationGrid"/);
+  assert.match(html, /Métadonnées introuvables/);
 });
 
 test('uses grouped IGDB external_games lookup and falls back by exact Steam AppID', async (t) => {
@@ -288,12 +402,15 @@ test('restart resumes interrupted work, retries legacy unavailable games, and ke
     first.db.prepare(`INSERT INTO metadata_cache(provider, external_id, provider_id, name, genres, found, fetched_at, expires_at)
       VALUES ('igdb', '620', '10620', 'Portal 2 IGDB', '["Puzzle"]', 1, ?, ?)`)
       .run(new Date().toISOString(), new Date(Date.now() + 86_400_000).toISOString());
+    first.db.prepare(`INSERT INTO game_manual_overrides(appid, display_name, updated_at, updated_by)
+      VALUES (620, 'Titre persistant', ?, 'admin')`).run(new Date().toISOString());
     first.close();
 
     const second = createApplication(options);
     assert.equal(second.db.prepare('SELECT metadata_status FROM games WHERE appid = 400').get().metadata_status, 'pending');
     assert.equal(second.db.prepare('SELECT metadata_status FROM games WHERE appid = 620').get().metadata_status, 'pending');
     assert.equal(Number(second.db.prepare("SELECT COUNT(*) AS count FROM metadata_cache WHERE provider = 'igdb'").get().count), 1);
+    assert.equal(second.db.prepare('SELECT display_name FROM game_manual_overrides WHERE appid = 620').get().display_name, 'Titre persistant');
     second.db.prepare("UPDATE games SET metadata_status = 'unavailable' WHERE appid = 620").run();
     second.close();
 

@@ -78,30 +78,58 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .dot-error { background: var(--warning); }
 .dot-unavailable { background: var(--danger); }
 
-.filters { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(5, minmax(145px, auto)); gap: 10px; }
+.filters { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(6, minmax(135px, auto)); gap: 10px; }
 .filters label { min-width: 0; }
 .game-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 16px; margin-top: 20px; }
 .game-card { min-width: 0; overflow: hidden; background: var(--surface); border: 1px solid #3b5878; border-radius: 11px; box-shadow: 0 8px 18px rgba(0, 0, 0, .17); }
+.game-card[role="button"] { cursor: pointer; }
+.game-card[role="button"]:focus-visible { outline: 3px solid rgba(124, 179, 255, .75); outline-offset: 2px; }
 .cover { position: relative; aspect-ratio: 460 / 215; background: linear-gradient(145deg, #29476a, #10233a); overflow: hidden; }
 .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cover img.failed { display: none; }
-.status-badge { position: absolute; top: 8px; right: 8px; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 8px; border-radius: 999px; color: #fff; font-size: .7rem; font-weight: 800; background: rgba(11, 26, 44, .88); border: 1px solid rgba(255, 255, 255, .22); backdrop-filter: blur(5px); }
+.status-badge { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 25px; height: 25px; padding: 0; border-radius: 50%; color: #d8e3ef; font-size: .78rem; font-weight: 900; background: rgba(11, 26, 44, .9); border: 1px solid rgba(255, 255, 255, .22); backdrop-filter: blur(5px); }
 .status-badge[data-status="synced"] { color: #aaf5dd; border-color: rgba(79, 209, 165, .7); }
 .status-badge[data-status="syncing"] { color: #b8d8ff; border-color: rgba(103, 168, 255, .75); }
 .status-badge[data-status="temporary_error"] { color: #ffdaa0; border-color: rgba(245, 185, 76, .75); }
-.status-badge[data-status="unavailable"] { color: #ffbbc0; border-color: rgba(244, 119, 126, .75); }
+.status-badge[data-status="unavailable"] { color: #ffdaa0; border-color: rgba(245, 185, 76, .75); }
 .card-body { padding: 13px; }
 .card-body h3 { margin: 0; min-height: 2.5em; font-size: .97rem; line-height: 1.25; }
 .card-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: .78rem; margin-top: 11px; }
+.application-type { display: inline-block; width: fit-content; margin-top: 9px; color: #a9c8ed; font-size: .72rem; }
 .genre-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; min-height: 23px; }
 .genre { border: 1px solid #476786; border-radius: 999px; padding: 3px 7px; color: #c9d8e8; font-size: .7rem; }
 
 .game-grid.list-view { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .list-view .game-card { display: grid; grid-template-columns: 190px 1fr; }
 .list-view .cover { aspect-ratio: 460 / 215; }
-.list-view .card-body { display: grid; grid-template-columns: minmax(220px, 1fr) auto minmax(220px, .7fr); align-items: center; gap: 20px; }
+.list-view .card-body { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto minmax(220px, .7fr); align-items: center; gap: 20px; }
 .list-view .card-body h3 { min-height: auto; }
 .list-view .card-meta, .list-view .genre-list { margin-top: 0; }
+
+.recommendation-controls { align-items: center; }
+.compact-option { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .78rem; }
+.recommendation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-top: 16px; }
+.recommendation-card { display: flex; flex-direction: column; min-width: 0; padding: 15px; border-radius: 11px; border: 1px solid #3b5878; background: rgba(13, 32, 55, .72); }
+.recommendation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.recommendation-heading h3 { margin: 0; font-size: .96rem; }
+.recommendation-heading strong { flex: 0 0 auto; color: var(--success); font-size: .78rem; }
+.recommendation-card ul { flex: 1; margin: 8px 0 14px; padding-left: 18px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.recommendation-card .button { align-self: flex-start; }
+
+.game-dialog { width: min(880px, calc(100% - 28px)); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid var(--border); border-radius: 15px; background: #142941; color: var(--text); padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.game-dialog::backdrop { background: rgba(3, 9, 17, .72); backdrop-filter: blur(3px); }
+.game-dialog form { padding: 22px; }
+.detail-layout { display: grid; grid-template-columns: minmax(220px, 330px) 1fr; gap: 22px; margin-top: 20px; }
+.detail-cover { width: 100%; aspect-ratio: 460 / 215; object-fit: cover; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-strong); }
+.detail-origin { margin-bottom: 12px; }
+.origin-badge { display: inline-block; border: 1px solid #477098; border-radius: 999px; padding: 5px 9px; color: #bed7f5; font-size: .72rem; }
+.origin-manual { color: #ffdaa0; border-color: rgba(245, 185, 76, .7); }
+.detail-facts { display: grid; grid-template-columns: minmax(120px, .45fr) 1fr; gap: 8px 14px; margin: 0; font-size: .82rem; }
+.detail-facts dt { color: var(--muted); }
+.detail-facts dd { margin: 0; overflow-wrap: anywhere; }
+.manual-editor { margin: 22px 0 0; padding: 16px; border: 1px solid var(--border); border-radius: 11px; }
+.manual-editor legend { padding: 0 7px; font-weight: 800; }
+.editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
 
 .empty-state { padding: 68px 20px; text-align: center; color: var(--muted); }
 .empty-state[hidden] { display: none; }
@@ -144,4 +172,5 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .list-view .game-card { grid-template-columns: 120px 1fr; }
   .list-view .card-body { display: block; }
   .list-view .card-meta, .list-view .genre-list { margin-top: 8px; }
+  .detail-layout, .editor-grid { grid-template-columns: 1fr; }
 }

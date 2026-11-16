@@ -1,19 +1,22 @@
 # Journal des versions
 
+## 0.7.0 — Recommandations explicables et fiches détaillées
+
+- Premier moteur de recommandation déterministe `explainable-v1`.
+- Scores et raisons fondés sur le statut joué, le temps Steam, les genres, thèmes, plateformes, sources et types.
+- Exclusion par défaut des applications techniques et non jouables.
+- Classification persistante : jeu, démo, bêta, prototype, test public, serveur, outil, DLC et composant multijoueur.
+- Filtre de bibliothèque par type d’application.
+- Libellé « Métadonnées introuvables » pour les possessions sans fiche correspondante.
+- Fiche détaillée accessible depuis la grille et la liste.
+- Corrections manuelles protégées par `ADMIN_TOKEN`, persistées séparément des valeurs sources.
+- Restauration individuelle des valeurs Steam/IGDB.
+- Préparation SQLite du futur rapprochement manuel IGDB, sans correspondance approximative.
+- Badges de synchronisation remplacés par des icônes discrètes, avec infobulle et libellé lecteur d’écran.
+
 ## 0.6.1 — IGDB secondaire et enrichissement accéléré
 
-- Authentification Twitch Client Credentials exclusivement côté serveur.
-- Rapprochement IGDB prioritaire par Steam AppID via `external_games`.
-- Requêtes IGDB groupées et cache SQLite persistant, y compris pour les absences.
-- Steam Store reste la source primaire dès que sa fiche existe.
-- Bascule IGDB pour une fiche Store absente, sans erreur temporaire artificielle.
-- Attribution explicite de la source dans l’API et les badges existants.
-- Enrichissement Steam concurrent, pause/reprise préservées et ralentissement sur HTTP 429.
-- Migration automatique des anciennes entrées `unavailable` pour les retester avec IGDB.
-- Ajout de `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` et des réglages de performance.
-
-## 0.6.0 — Imports et enrichissement progressif
-
-- Synchronisation d’un profil Steam public sans `response.txt`.
-- Enrichissement progressif, statuts persistants et reprise.
-- Réinitialisations avec sauvegarde SQLite.
+- Authentification Twitch Client Credentials côté serveur.
+- Rapprochement IGDB par Steam AppID exact, requêtes groupées et cache SQLite.
+- Steam Store conservé comme source primaire.
+- Enrichissement Steam concurrent et reprise persistante.

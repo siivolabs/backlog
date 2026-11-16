@@ -9,7 +9,8 @@ const state = {
   pageSize: 48,
   statusPoll: null,
   libraryRefreshTick: 0,
-  adminToken: ''
+  adminToken: '',
+  selectedAppid: null
 };
 
 const elements = Object.fromEntries([
@@ -17,23 +18,35 @@ const elements = Object.fromEntries([
   'totalGames', 'neverPlayed', 'totalHours', 'playedGames', 'startButton', 'pauseButton',
   'retryButton', 'progressMessage', 'progressPercent', 'progressBar', 'countPending',
   'countSyncing', 'countSynced', 'countErrors', 'countUnavailable', 'searchInput',
-  'playFilter', 'statusFilter', 'genreFilter', 'sortSelect', 'viewSelect', 'gameGrid',
+  'playFilter', 'statusFilter', 'appTypeFilter', 'genreFilter', 'sortSelect', 'viewSelect', 'gameGrid',
   'emptyState', 'emptyTitle', 'emptyText', 'pagination', 'previousPage', 'nextPage',
   'pageInfo', 'openResetButton', 'resetDialog', 'resetScope', 'resetConfirmation',
-  'confirmResetButton', 'toast'
+  'confirmResetButton', 'includePlayedRecommendations', 'includeTechnicalRecommendations',
+  'refreshRecommendations', 'recommendationSummary', 'recommendationGrid', 'gameDialog',
+  'detailTitle', 'detailCover', 'detailOrigin', 'detailFacts', 'detailClassification',
+  'detailIgdbFuture', 'editDisplayName', 'editApplicationType', 'editGenres', 'editThemes',
+  'editPlatforms', 'saveGameButton', 'restoreSourceButton', 'toast'
 ].map((id) => [id, document.getElementById(id)]));
 
 const statusLabels = {
-  pending: '⏳ En attente',
-  syncing: '↻ En cours',
-  synced: '✓ Synchronisé',
-  temporary_error: '⚠ Erreur temporaire',
-  unavailable: '× Indisponible'
+  pending: 'En attente',
+  syncing: 'En cours',
+  synced: 'Synchronisé',
+  temporary_error: 'Erreur temporaire',
+  unavailable: 'Métadonnées introuvables'
 };
+
+const statusIcons = { pending: '…', syncing: '↻', synced: '✓', temporary_error: '!', unavailable: '⚠' };
 
 const sourceLabels = {
   steam_store: 'Steam Store',
   igdb: 'IGDB'
+};
+
+const applicationTypeLabels = {
+  full_game: 'Jeu complet', demo: 'Démo', beta: 'Bêta', prototype: 'Prototype',
+  public_test: 'Test public', dedicated_server: 'Serveur dédié', software_tool: 'Logiciel / outil',
+  dlc: 'DLC', multiplayer_component: 'Composant multijoueur', unknown: 'Type inconnu'
 };
 
 const numberFormatter = new Intl.NumberFormat('fr-FR');
@@ -138,6 +151,7 @@ function applyFilters() {
   const query = elements.searchInput.value.trim().toLocaleLowerCase('fr');
   const play = elements.playFilter.value;
   const status = elements.statusFilter.value;
+  const applicationType = elements.appTypeFilter.value;
   const genre = elements.genreFilter.value;
   const sort = elements.sortSelect.value;
 
@@ -146,6 +160,7 @@ function applyFilters() {
     if (play === 'unplayed' && game.playtime_forever !== 0) return false;
     if (play === 'played' && game.playtime_forever === 0) return false;
     if (status !== 'all' && game.metadata_status !== status) return false;
+    if (applicationType !== 'all' && game.application_type !== applicationType) return false;
     if (genre !== 'all' && !(game.genres || []).includes(genre)) return false;
     return true;
   });
@@ -193,6 +208,16 @@ function renderGames() {
 function createGameCard(game) {
   const article = document.createElement('article');
   article.className = 'game-card';
+  article.tabIndex = 0;
+  article.setAttribute('role', 'button');
+  article.setAttribute('aria-label', `Ouvrir la fiche de ${game.name}`);
+  article.addEventListener('click', () => openGameDetail(game.appid));
+  article.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openGameDetail(game.appid);
+    }
+  });
 
   const cover = document.createElement('div');
   cover.className = 'cover';
@@ -205,9 +230,17 @@ function createGameCard(game) {
   badge.className = 'status-badge';
   badge.dataset.status = game.metadata_status;
   const source = sourceLabels[game.metadata_source] || null;
-  badge.textContent = statusLabels[game.metadata_status] || statusLabels.pending;
-  if (game.metadata_status === 'synced' && source) badge.textContent += ` · ${source}`;
-  badge.title = [source ? `Source : ${source}` : null, game.metadata_error].filter(Boolean).join('\n');
+  const statusLabel = statusLabels[game.metadata_status] || statusLabels.pending;
+  const statusDetail = [statusLabel, source ? `Source : ${source}` : null, game.metadata_error].filter(Boolean).join(' — ');
+  badge.title = statusDetail;
+  badge.setAttribute('aria-label', statusDetail);
+  const icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = statusIcons[game.metadata_status] || statusIcons.pending;
+  const accessible = document.createElement('span');
+  accessible.className = 'sr-only';
+  accessible.textContent = statusDetail;
+  badge.append(icon, accessible);
   cover.append(image, badge);
 
   const body = document.createElement('div');
@@ -221,6 +254,10 @@ function createGameCard(game) {
   const appid = document.createElement('span');
   appid.textContent = `AppID ${game.appid}`;
   meta.append(playtime, appid);
+  const type = document.createElement('span');
+  type.className = 'application-type';
+  type.textContent = applicationTypeLabels[game.application_type] || applicationTypeLabels.unknown;
+  if (game.manual_override) type.textContent += ' · corrigé';
   const genres = document.createElement('div');
   genres.className = 'genre-list';
   for (const genre of (game.genres || []).slice(0, 3)) {
@@ -229,9 +266,161 @@ function createGameCard(game) {
     chip.textContent = genre;
     genres.appendChild(chip);
   }
-  body.append(title, meta, genres);
+  body.append(title, meta, type, genres);
   article.append(cover, body);
   return article;
+}
+
+function createRecommendationCard(game) {
+  const article = document.createElement('article');
+  article.className = 'recommendation-card';
+  const heading = document.createElement('div');
+  heading.className = 'recommendation-heading';
+  const title = document.createElement('h3');
+  title.textContent = game.name;
+  const score = document.createElement('strong');
+  score.textContent = `${game.recommendation_score.toLocaleString('fr-FR')} pts`;
+  heading.append(title, score);
+  const type = document.createElement('p');
+  type.className = 'help';
+  type.textContent = `${applicationTypeLabels[game.application_type] || applicationTypeLabels.unknown} · ${sourceLabels[game.metadata_source] || 'Source inconnue'}`;
+  const reasons = document.createElement('ul');
+  for (const reason of game.recommendation_reasons.slice(0, 3)) {
+    const item = document.createElement('li');
+    item.textContent = reason;
+    reasons.appendChild(item);
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'button button-secondary';
+  button.textContent = 'Voir la fiche';
+  button.addEventListener('click', () => openGameDetail(game.appid));
+  article.append(heading, type, reasons, button);
+  return article;
+}
+
+async function loadRecommendations() {
+  setBusy(elements.refreshRecommendations, true, 'Calcul…');
+  try {
+    const params = new URLSearchParams({
+      limit: '12',
+      includePlayed: elements.includePlayedRecommendations.checked ? '1' : '0',
+      includeNonGames: elements.includeTechnicalRecommendations.checked ? '1' : '0'
+    });
+    const payload = await request(`/api/recommendations?${params}`);
+    elements.recommendationGrid.replaceChildren(...payload.suggestions.map(createRecommendationCard));
+    const profileParts = [`${payload.profile.playedGames} jeu(x) joué(s) analysé(s)`];
+    if (payload.profile.topGenres.length) profileParts.push(`genres dominants : ${payload.profile.topGenres.join(', ')}`);
+    if (payload.profile.topThemes.length) profileParts.push(`thèmes dominants : ${payload.profile.topThemes.join(', ')}`);
+    elements.recommendationSummary.textContent = payload.suggestions.length
+      ? `Classement déterministe ${payload.algorithm} — ${profileParts.join(' · ')}.`
+      : 'Aucune suggestion ne correspond encore aux critères et aux métadonnées disponibles.';
+  } catch (error) {
+    elements.recommendationSummary.textContent = error.message;
+    elements.recommendationGrid.replaceChildren();
+  } finally {
+    setBusy(elements.refreshRecommendations, false);
+  }
+}
+
+function appendFact(label, value) {
+  const term = document.createElement('dt');
+  term.textContent = label;
+  const description = document.createElement('dd');
+  description.textContent = value || 'Non renseigné';
+  elements.detailFacts.append(term, description);
+}
+
+function commaValues(value) {
+  return [...new Set(String(value || '').split(',').map((item) => item.trim()).filter(Boolean))];
+}
+
+function sameList(left, right) {
+  return JSON.stringify([...(left || [])].sort()) === JSON.stringify([...(right || [])].sort());
+}
+
+async function openGameDetail(appid) {
+  try {
+    const payload = await request(`/api/games/${appid}`);
+    const game = payload.game;
+    state.selectedAppid = game.appid;
+    elements.detailTitle.textContent = game.name;
+    elements.detailCover.src = game.header_image;
+    elements.detailCover.alt = `Jaquette de ${game.name}`;
+    elements.detailOrigin.replaceChildren();
+    const origin = document.createElement('span');
+    origin.className = `origin-badge ${game.manual_override ? 'origin-manual' : 'origin-source'}`;
+    origin.textContent = game.manual_override ? `Corrigé manuellement (${game.manual_fields.join(', ')})` : 'Données importées';
+    elements.detailOrigin.appendChild(origin);
+    elements.detailFacts.replaceChildren();
+    appendFact('AppID Steam', String(game.appid));
+    appendFact('Temps de jeu', formatPlaytime(game.playtime_forever));
+    appendFact('Statut de jeu', game.playtime_forever > 0 ? 'Déjà lancé' : 'Jamais lancé');
+    appendFact('Type', applicationTypeLabels[game.application_type] || applicationTypeLabels.unknown);
+    appendFact('Genres', game.genres.join(', '));
+    appendFact('Thèmes', game.themes.join(', '));
+    appendFact('Plateformes', game.platforms.join(', '));
+    appendFact('Sources', game.metadata_sources.map((source) => sourceLabels[source] || source).join(', '));
+    appendFact('Synchronisation', statusLabels[game.metadata_status] || statusLabels.pending);
+    elements.detailClassification.textContent = `Classification : ${game.classification_reason || 'non documentée'} Confiance : ${game.classification_confidence}.`;
+    elements.detailIgdbFuture.textContent = game.igdb_manual_match?.status === 'confirmed'
+      ? `Rapprochement IGDB manuel confirmé : ${game.igdb_manual_match.igdb_game_id}.`
+      : 'Rapprochement IGDB manuel préparé mais inactif : aucune correspondance approximative n’est appliquée automatiquement.';
+    elements.editDisplayName.value = game.name;
+    elements.editApplicationType.value = game.application_type;
+    elements.editGenres.value = game.genres.join(', ');
+    elements.editThemes.value = game.themes.join(', ');
+    elements.editPlatforms.value = game.platforms.join(', ');
+    if (!elements.gameDialog.open) elements.gameDialog.showModal();
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+async function saveGameCorrection() {
+  if (!state.selectedAppid) return;
+  const current = state.games.find((game) => game.appid === state.selectedAppid);
+  if (!current) return showToast('Jeu introuvable dans la bibliothèque chargée.', 'error');
+  const source = current.source_values;
+  const name = elements.editDisplayName.value.trim();
+  const genres = commaValues(elements.editGenres.value);
+  const themes = commaValues(elements.editThemes.value);
+  const platforms = commaValues(elements.editPlatforms.value);
+  const patch = {
+    display_name: name === source.name ? null : name,
+    application_type: elements.editApplicationType.value === source.application_type ? null : elements.editApplicationType.value,
+    genres: sameList(genres, source.genres) ? null : genres,
+    themes: sameList(themes, source.themes) ? null : themes,
+    platforms: sameList(platforms, source.platforms) ? null : platforms
+  };
+  setBusy(elements.saveGameButton, true, 'Enregistrement…');
+  try {
+    const payload = await request(`/api/games/${state.selectedAppid}/manual`, { method: 'PATCH', admin: true, body: JSON.stringify(patch) });
+    showToast('Correction manuelle enregistrée dans SQLite.');
+    await loadLibrary();
+    await loadRecommendations();
+    await openGameDetail(payload.game.appid);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setBusy(elements.saveGameButton, false);
+  }
+}
+
+async function restoreSourceValues() {
+  if (!state.selectedAppid) return;
+  setBusy(elements.restoreSourceButton, true, 'Restauration…');
+  try {
+    const payload = await request(`/api/games/${state.selectedAppid}/manual`, { method: 'DELETE', admin: true });
+    showToast('Valeurs issues des sources rétablies.');
+    await loadLibrary();
+    await loadRecommendations();
+    await openGameDetail(payload.game.appid);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    setBusy(elements.restoreSourceButton, false);
+  }
 }
 
 function renderEnrichment(status) {
@@ -263,6 +452,7 @@ async function pollStatus() {
     } else if (state.libraryRefreshTick) {
       state.libraryRefreshTick = 0;
       await loadLibrary();
+      await loadRecommendations();
     }
   } catch (error) {
     elements.serviceState.textContent = 'Serveur indisponible';
@@ -280,6 +470,7 @@ async function synchronizeProfile() {
     });
     showToast(`${result.gameCount.toLocaleString('fr-FR')} jeu(x) synchronisé(s) pour ${result.profileName}.`);
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
+    await loadRecommendations();
   } catch (error) {
     showToast(error.message, 'error');
   } finally {
@@ -339,6 +530,7 @@ async function resetData() {
     elements.resetConfirmation.value = '';
     showToast(`Réinitialisation terminée. Sauvegarde : ${payload.backup || 'non applicable'}.`);
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
+    await loadRecommendations();
   } catch (error) {
     showToast(error.message, 'error');
   } finally {
@@ -355,7 +547,7 @@ function bindEvents() {
   elements.pauseButton.addEventListener('click', pauseEnrichment);
   elements.retryButton.addEventListener('click', retryErrors);
   elements.searchInput.addEventListener('input', () => { state.page = 1; applyFilters(); });
-  for (const control of [elements.playFilter, elements.statusFilter, elements.genreFilter, elements.sortSelect]) {
+  for (const control of [elements.playFilter, elements.statusFilter, elements.appTypeFilter, elements.genreFilter, elements.sortSelect]) {
     control.addEventListener('change', () => { state.page = 1; applyFilters(); });
   }
   elements.viewSelect.addEventListener('change', renderGames);
@@ -363,12 +555,18 @@ function bindEvents() {
   elements.nextPage.addEventListener('click', () => { state.page += 1; renderGames(); window.scrollTo({ top: elements.gameGrid.offsetTop - 30, behavior: 'smooth' }); });
   elements.openResetButton.addEventListener('click', () => elements.resetDialog.showModal());
   elements.confirmResetButton.addEventListener('click', resetData);
+  elements.refreshRecommendations.addEventListener('click', loadRecommendations);
+  elements.includePlayedRecommendations.addEventListener('change', loadRecommendations);
+  elements.includeTechnicalRecommendations.addEventListener('change', loadRecommendations);
+  elements.saveGameButton.addEventListener('click', saveGameCorrection);
+  elements.restoreSourceButton.addEventListener('click', restoreSourceValues);
 }
 
 async function initialize() {
   bindEvents();
   try {
     await Promise.all([loadConfig(), loadLibrary({ preservePage: false }), pollStatus()]);
+    await loadRecommendations();
     state.statusPoll = setInterval(pollStatus, 2000);
   } catch (error) {
     elements.serviceState.textContent = 'Serveur indisponible';
