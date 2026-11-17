@@ -1,27 +1,40 @@
-# Backlog 0.9.0
+# Backlog 0.9.1
 
-Backlog 0.9 transforme le POC d’analyse en une **base de connaissances vérifiable** sur les jeux et en un début de profil de préférences personnelles.
+Backlog 0.9.1 améliore la **qualité des dossiers documentaires** utilisés par Qwen3 et empêche qu’un profil trop pauvre soit présenté comme prêt.
 
-## Fonctionnalités livrées
+## Nouveautés 0.9.1
 
-- tableau de bord IA ;
-- filtre de bibliothèque par statut IA ;
-- profil complet et sources consultables ;
-- réanalyse d’un jeu sans relancer le lot ;
-- erreurs détaillées avec étape, message et tentatives ;
-- historique des profils et validation humaine ;
-- comparaison des similarités ;
-- évaluation séparée de la similarité et de l’intérêt personnel ;
-- saisie de l’expérience du joueur ;
-- arrêt du polling dès qu’une tâche atteint un état terminal ;
-- migration SQLite additive depuis 0.8.x.
+- diagnostic Ollama structuré : configuration, accès, modèles, génération minimale et durée ;
+- récupération enrichie des descriptions, catégories et développeurs Steam ;
+- réutilisation des données présentes dans `provider_cache`, notamment IGDB (résumé, synopsis, thèmes, plateformes, modes et perspective lorsqu’ils existent) ;
+- quatre recherches SearXNG ciblées par jeu : gameplay, structure, expérience et sources officielles ;
+- filtrage des DLC, pages commerciales, catalogues et simples mentions ;
+- récupération bornée du contenu textuel des pages retenues, avec protection SSRF et contrôle des redirections ;
+- dossier documentaire versionné et consultable, avec pertinence, confiance, état de récupération et dimensions justifiées ;
+- schéma Qwen stable avec provenance par champ (`documented`, `interpreted`, `unknown`, `contradictory`, `human_corrected`) ;
+- qualité `complete`, `partial` ou `insufficient` ;
+- aucun embedding définitif pour un profil `insufficient` ;
+- rendu récursif des objets historiques : plus de `[object Object]` ;
+- collecte, analyse et embedding relançables séparément ;
+- comparaison côte à côte de la version active et d’une candidate ;
+- aucune analyse de masse au démarrage.
+
+## Pilote recommandé
+
+Valider d’abord le pipeline sur trois jeux différents :
+
+1. Euro Truck Simulator 2 ;
+2. Control ;
+3. Satisfactory.
+
+N’étendre le traitement qu’après vérification manuelle des sources, des champs inconnus, de la provenance et de la comparaison avec les anciens profils.
 
 ## Pré-requis
 
-- Node.js 24 ou l’image Docker fournie (SQLite est intégré à Node) ;
+- Node.js 24 ou l’image Docker fournie ;
 - Ollama accessible depuis le conteneur ;
-- `qwen3:32b` et `embeddinggemma` installés, sauf si les variables de modèles sont adaptées ;
-- SearXNG facultatif.
+- `qwen3:32b` et `embeddinggemma`, sauf adaptation des variables ;
+- SearXNG pour la recherche documentaire externe.
 
 ## Variables
 
@@ -31,19 +44,37 @@ Backlog 0.9 transforme le POC d’analyse en une **base de connaissances vérifi
 | `DATA_DIR` | `/data` | Dossier persistant |
 | `DATABASE_PATH` | détection automatique | Fichier SQLite existant |
 | `ADMIN_TOKEN` | vide | Protège les mutations |
-| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | API Ollama |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | API Ollama vue depuis le conteneur |
 | `AI_ANALYSIS_MODEL` | `qwen3:32b` | Modèle de profil |
 | `AI_EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
 | `AI_EMBEDDING_DIMENSIONS` | `768` | Dimension attendue |
-| `SEARXNG_BASE_URL` | vide | Recherche documentaire |
+| `AI_DIAGNOSTIC_TIMEOUT_MS` | `15000` | Délai du test de disponibilité |
+| `AI_DIAGNOSTIC_GENERATION_TIMEOUT_MS` | `60000` | Délai de la génération minimale |
+| `AI_ANALYSIS_TIMEOUT_MS` | `480000` | Délai d’analyse Qwen |
+| `AI_EMBEDDING_TIMEOUT_MS` | `120000` | Délai d’embedding |
+| `SEARXNG_BASE_URL` | vide | API de recherche documentaire |
 | `SEARXNG_LANGUAGE` | `fr-FR` | Langue SearXNG |
+| `AI_MAX_WEB_PAGES` | `8` | Nombre maximal de pages récupérées par dossier |
+| `AI_MAX_PAGE_BYTES` | `750000` | Taille maximale d’une page |
+| `AI_PAGE_TIMEOUT_MS` | `15000` | Délai de téléchargement d’une page |
+
+## Opérations indépendantes
+
+Dans la fiche d’un jeu :
+
+- **Actualiser le dossier** ne relance ni Qwen ni l’embedding ;
+- **Analyser le dossier** crée un nouveau profil sans embedding ;
+- **Générer l’embedding** travaille sur le profil affiché, sauf s’il est insuffisant ;
+- **Réanalyse complète** enchaîne collecte, analyse et embedding lorsque la qualité le permet.
+
+Une réanalyse complète reste strictement limitée au jeu sélectionné.
 
 ## Vérification locale
 
 ```bash
-npm test
 npm run check
-DATA_DIR=/tmp/backlog-v09 PORT=3000 node server.js
+npm test
+DATA_DIR=/tmp/backlog-v091 PORT=3000 node server.js
 curl http://127.0.0.1:3000/healthz
 ```
 
@@ -51,14 +82,11 @@ Aucune dépendance npm tierce n’est nécessaire.
 
 ## Déploiement
 
-Consulter [MIGRATION.md](MIGRATION.md) avant de reconstruire l’image. Conserver le workflow `.github/workflows/docker-publish.yml` déjà présent dans le dépôt.
+1. Lire [MIGRATION.md](MIGRATION.md).
+2. Sauvegarder le volume SQLite.
+3. Publier le contenu de l’archive à la racine du dépôt.
+4. Conserver `.github/workflows/docker-publish.yml` déjà présent sur GitHub si le dépôt en contient un.
+5. Reconstruire `ghcr.io/siivolabs/backlog:dev`, puis redéployer avec Dockge.
+6. Exécuter **Tester Ollama** avant toute réanalyse.
 
-## Compatibilité avec la base 0.8
-
-La couche 0.9 découvre la table de bibliothèque grâce aux colonnes AppID + nom. Elle reconnaît les variantes courantes (`appid`, `app_id`, `steam_app_id`, `name`, `title`) et importe une table de profils historique contenant un AppID et une colonne JSON (`profile_json`, `profile`, `analysis_json`, etc.).
-
-Si l’installation utilise des noms hors de cette liste, le démarrage reste non destructif et l’interface indique qu’aucune source de bibliothèque n’a été détectée. Il suffit alors d’étendre les listes de compatibilité dans `lib/database.js` ou de fournir un export de schéma SQLite pour ajouter le mapping exact.
-
-## Limite volontaire
-
-Le moteur classique n’est plus affiché dans l’interface principale, mais ses anciennes tables ne sont ni supprimées ni modifiées. Il reste donc disponible pour comparaison ou retour arrière.
+Les anciennes tables, les profils 0.8/0.9.0, les corrections humaines et les préférences personnelles sont conservés.

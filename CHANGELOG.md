@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.1 — Dossiers documentaires fiables
+
+### Diagnostic et exploitation
+- Diagnostic Ollama structuré par étape, avec contrôle des modèles et génération minimale.
+- Messages exploitables pour serveur inaccessible, modèle absent, délai dépassé ou génération en échec.
+- Collecte, analyse et embedding relançables indépendamment, jeu par jeu.
+
+### Collecte documentaire
+- Descriptions, catégories et développeurs Steam enrichis.
+- Réutilisation des métadonnées IGDB présentes dans `provider_cache`.
+- Requêtes SearXNG ciblées sur gameplay, structure, expérience et sources officielles.
+- Filtrage des DLC, pages commerciales et catalogues génériques.
+- Récupération bornée du contenu des pages avec protection SSRF.
+- Dossiers et sources versionnés avec pertinence, confiance et provenance.
+
+### Profils et qualité
+- Schéma Qwen stable avec état et sources par champ.
+- Qualité `complete`, `partial` ou `insufficient`.
+- Aucun embedding définitif pour un profil insuffisant.
+- Comparaison côte à côte entre version active et candidate.
+- Rendu récursif des objets historiques, sans `[object Object]`.
+
+### Données
+- Migration 0.9.0 vers 0.9.1 additive et idempotente.
+- Aucune réanalyse en masse automatique.
+
 ## 0.9.0 — Connaissances IA vérifiables
 
 ### Interface

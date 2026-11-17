@@ -1,20 +1,22 @@
-# Migration de Backlog 0.8.x vers 0.9.0
+# Migration vers Backlog 0.9.1
 
 ## Principe de sécurité
 
-La migration est **additive**. Au démarrage, Backlog 0.9 :
+La migration est **additive et idempotente**. Au démarrage, Backlog 0.9.1 :
 
-1. détecte le fichier SQLite existant dans `/data` (ou utilise `DATABASE_PATH`) ;
-2. crée uniquement les tables préfixées `ai_v09_*`, `ai_profile_*`, `ai_analysis_*`, `ai_similarity_*` et `player_game_experience` manquantes ;
-3. repère une table historique de profils IA par introspection ;
-4. importe chaque profil 0.8 comme **version 1 active, générée mais non validée** ;
-5. enregistre la fin de l’import dans `ai_v09_meta`, ce qui rend l’opération idempotente.
+1. détecte le SQLite existant dans `/data` ou via `DATABASE_PATH` ;
+2. conserve toutes les tables et lignes existantes ;
+3. ajoute seulement les colonnes de qualité/provenance manquantes aux tables 0.9.0 ;
+4. crée les tables versionnées `ai_document_dossiers` et `ai_document_sources` ;
+5. conserve l’import historique 0.8 déjà effectué ;
+6. marque dans `ai_v09_meta` le schéma `0.9.1` ;
+7. ne crée aucune tâche d’analyse automatique.
 
-Aucune table Steam, IGDB ou bibliothèque existante n’est supprimée ou modifiée.
+Les versions actives et candidates 0.9.0 restent inchangées. Les anciens profils sans provenance sont affichés comme profils historiques ; le rendu récursif évite `[object Object]`.
 
 ## Procédure recommandée
 
-1. **Arrêter Backlog** dans Dockge afin que SQLite ferme proprement son journal WAL.
+1. **Arrêter Backlog** dans Dockge pour fermer proprement le journal WAL.
 2. Sauvegarder le volume complet :
 
    ```bash
@@ -22,36 +24,38 @@ Aucune table Steam, IGDB ou bibliothèque existante n’est supprimée ou modifi
    ./scripts/backup-and-verify.sh /srv/docker/backlog/data
    ```
 
-3. Vérifier le nom du fichier SQLite présent dans le volume.
-4. Si le nom n’est pas standard, définir explicitement :
+3. Vérifier le fichier SQLite. Si son nom n’est pas standard, définir explicitement :
 
    ```yaml
    DATABASE_PATH: "/data/nom-existant.sqlite"
    ```
 
-5. Conserver le même montage `./data:/data` et les variables Ollama/SearXNG actuelles.
-6. Publier les fichiers 0.9 dans le dépôt en conservant `.github/workflows/docker-publish.yml`.
-7. Attendre la construction de `ghcr.io/siivolabs/backlog:dev`, puis recréer le conteneur.
-8. Ouvrir le tableau de bord et vérifier :
-   - le nombre total de jeux ;
-   - les profils importés ;
-   - la table SQLite détectée ;
-   - le test Ollama ;
-   - un profil et ses sources ;
-   - une réanalyse individuelle.
+4. Conserver le montage `./data:/data` et l’adresse Ollama réellement joignable depuis le conteneur.
+5. Publier les fichiers 0.9.1 à la racine du dépôt en conservant le workflow GitHub existant.
+6. Attendre la construction de l’image, puis recréer le conteneur.
+7. Vérifier `/healthz` : la version doit être `0.9.1`.
+8. Dans **Administration IA**, exécuter **Tester Ollama**. Le diagnostic doit atteindre l’étape `completed`.
+9. Comparer le nombre de jeux et de profils à la version précédente.
+10. Actualiser uniquement le dossier d’Euro Truck Simulator 2, puis inspecter les sources avant d’analyser.
+11. Répéter le pilote avec Control et Satisfactory.
+
+## Contrôles du pilote
+
+Pour chacun des trois jeux :
+
+- les descriptions Steam non vides figurent dans le dossier ;
+- les données IGDB de `provider_cache` sont reprises lorsqu’elles existent ;
+- les pages de DLC et catalogues génériques ne dominent pas la sélection ;
+- les sources indiquent leur confiance, leur pertinence et les champs justifiés ;
+- toute dimension est documentée, interprétée, inconnue ou contradictoire ;
+- aucun `[object Object]` n’apparaît ;
+- un profil insuffisant n’a pas d’embedding définitif ;
+- la version active reste disponible tant que la candidate n’est pas validée.
 
 ## Retour arrière
 
-1. Arrêter le conteneur 0.9.
-2. Restaurer le dossier de sauvegarde complet dans le volume `/data`.
-3. Redéployer l’image 0.8.x précédente.
+1. Arrêter le conteneur 0.9.1.
+2. Restaurer le dossier de sauvegarde complet dans `/data`.
+3. Redéployer l’image précédente.
 
-Les tables 0.9 n’entrent pas en conflit avec les anciennes tables ; un retour d’image seul est généralement possible, mais restaurer la sauvegarde garantit un état identique.
-
-## Sémantique des versions
-
-- Une première analyse sans version active peut devenir active, avec l’état `generated`.
-- Une réanalyse crée une version `draft` et conserve la version active.
-- `Valider cette version` rend la candidate active et classe l’ancienne en `superseded`.
-- `Rejeter` conserve la version active précédente.
-- Les sorties Qwen, corrections humaines et retours personnels restent séparés.
+Un retour d’image seul ne supprime pas les tables 0.9.1, mais restaurer le volume garantit un état strictement identique.

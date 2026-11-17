@@ -69,3 +69,62 @@ test('resolveDatabasePath privilégie un fichier SQLite existant',()=>{
   try { fs.writeFileSync(path.join(dir,'backlog.db'),''); assert.equal(resolveDatabasePath({DATA_DIR:dir}),path.join(dir,'backlog.db')); }
   finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
+
+
+test('versionne les dossiers documentaires séparément des profils',()=>{
+  const {database,dir}=fixture();
+  try {
+    const base={quality_status:'partial',completeness_score:64,dimensions:{gameplay_loops:true},notes:['Ambiance manquante'],source_fingerprint:'abc',sources:[{sourceType:'steam',sourceKey:'steam:400',title:'Steam',excerpt:'Description détaillée',supports:['summary'],confidence:'high',relevanceScore:10,retrievalStatus:'structured'}]};
+    const first=database.insertDossier('400',base);
+    const second=database.insertDossier('400',{...base,quality_status:'complete',completeness_score:88,source_fingerprint:'def'});
+    assert.equal(first.version_no,1);
+    assert.equal(second.version_no,2);
+    assert.equal(database.getLatestDossier('400').quality_status,'complete');
+    assert.equal(database.getLatestDossier('400').sources[0].confidence,'high');
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('marque un profil insuffisant sans embedding comme tel dans la bibliothèque',()=>{
+  const {database,dir,profile}=fixture();
+  try {
+    database.db.prepare(`UPDATE ai_profile_versions SET lifecycle_state='superseded' WHERE app_id='400'`).run();
+    database.insertProfileVersion({appId:'400',profile,embedding:null,lifecycleState:'active',qualityStatus:'needs_review',documentQuality:'insufficient',completenessScore:37});
+    const game=database.attachAiState(database.getGame('400'));
+    assert.equal(game.aiStatus,'insufficient');
+    assert.equal(game.documentCompleteness,37);
+    assert.throws(()=>database.reviewProfile(database.getActiveProfile('400').id,{action:'validate'}),/insuffisamment documenté/);
+    const job=database.createJob('400','documents');
+    assert.equal(job.operation,'documents');
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+
+test('migration 0.9.0 vers 0.9.1 reste additive et conserve la version active',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'backlog-v090-migration-'));
+  const filename=path.join(dir,'backlog.sqlite');
+  const old=new DatabaseSync(filename);
+  old.exec(`
+    CREATE TABLE games(appid TEXT PRIMARY KEY,name TEXT NOT NULL);
+    INSERT INTO games VALUES('227300','Euro Truck Simulator 2');
+    CREATE TABLE ai_v09_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL);
+    INSERT INTO ai_v09_meta VALUES('legacy_import_v1','done','2026-11-17T00:00:00.000Z');
+    CREATE TABLE ai_profile_versions(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,app_id TEXT NOT NULL,version_no INTEGER NOT NULL,
+      lifecycle_state TEXT NOT NULL DEFAULT 'active',quality_status TEXT NOT NULL DEFAULT 'generated',
+      profile_json TEXT NOT NULL,embedding_json TEXT,model TEXT,embedding_model TEXT,prompt_version TEXT,
+      source_fingerprint TEXT,generated_at TEXT NOT NULL,based_on_version_id INTEGER,validated_at TEXT,
+      validation_notes TEXT,UNIQUE(app_id,version_no)
+    );
+    INSERT INTO ai_profile_versions(app_id,version_no,lifecycle_state,quality_status,profile_json,generated_at)
+      VALUES('227300',1,'active','generated','{"summary":"profil existant"}','2026-11-17T00:00:00.000Z');
+  `);
+  old.close();
+  const database=new BacklogDatabase(filename,{logger:{info(){}}});
+  try {
+    assert.equal(database.getActiveProfile('227300').version_no,1);
+    assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_profile_versions').get().count,1);
+    assert.ok(database.columns('ai_profile_versions').includes('document_quality'));
+    assert.ok(database.tableNames().includes('ai_document_dossiers'));
+    assert.equal(database.getMeta('schema_version'),'0.9.1');
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

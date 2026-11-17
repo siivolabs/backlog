@@ -7,7 +7,7 @@ const { URL } = require('node:url');
 const { BacklogDatabase, resolveDatabasePath } = require('./lib/database');
 const { AiEngine } = require('./lib/ai-engine');
 
-const VERSION = '0.9.0';
+const VERSION = '0.9.1';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);
@@ -41,7 +41,7 @@ function requireAdmin(req) {
 }
 
 function publicConfig() {
-  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null };
+  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, ollamaConfigured:aiEngine.config.ollamaExplicitlyConfigured, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null };
 }
 
 function addGameNames(items) {
@@ -62,19 +62,21 @@ async function api(req,res,url) {
   let match=pathname.match(/^\/api\/v09\/games\/([^/]+)$/);
   if (method==='GET'&&match) {
     const appId=decodeURIComponent(match[1]); const game=database.getGame(appId); if(!game)return jsonError(res,404,'Jeu introuvable');
-    return send(res,200,{...database.attachAiState(game),profile:database.getProfileBundle(appId),experience:database.getExperience(appId)});
+    return send(res,200,{...database.attachAiState(game),profile:database.getProfileBundle(appId),dossier:database.getLatestDossier(appId),experience:database.getExperience(appId)});
   }
   match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/(profile|sources|similarities|history|experience)$/);
   if (method==='GET'&&match) {
     const appId=decodeURIComponent(match[1]); const type=match[2]; const bundle=database.getProfileBundle(appId);
     if(type==='profile') return send(res,200,{bundle});
-    if(type==='sources') return send(res,200,{items:bundle?.displayed?.sources||[]});
+    if(type==='sources') { const dossier=database.getLatestDossier(appId); return send(res,200,{dossier,items:dossier?.sources||bundle?.displayed?.sources||[]}); }
     if(type==='similarities') return send(res,200,{items:addGameNames(database.similarities(appId))});
     if(type==='history') return send(res,200,{items:database.history(appId)});
     return send(res,200,{experience:database.getExperience(appId)});
   }
   match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/reanalyze$/);
   if(method==='POST'&&match){ requireAdmin(req); const appId=decodeURIComponent(match[1]); if(!database.getGame(appId))return jsonError(res,404,'Jeu introuvable'); const job=aiEngine.enqueue(appId); return send(res,202,{job}); }
+  match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/(documents|analysis|embedding)$/);
+  if(method==='POST'&&match){ requireAdmin(req); const appId=decodeURIComponent(match[1]); if(!database.getGame(appId))return jsonError(res,404,'Jeu introuvable'); const job=aiEngine.enqueue(appId,match[2]); return send(res,202,{job}); }
   match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/retry$/);
   if(method==='POST'&&match){ requireAdmin(req); const appId=decodeURIComponent(match[1]); const job=aiEngine.enqueue(appId); return send(res,202,{job}); }
   match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/experience$/);

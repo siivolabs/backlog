@@ -1,35 +1,31 @@
-# Vérification du livrable 0.9.0
+# Vérification du livrable 0.9.1
 
-## Contrôles exécutés
+## Contrôles automatisés
 
-- analyse syntaxique de `server.js`, `lib/database.js`, `lib/ai-engine.js` et `public/app.js` ;
-- 6 tests automatisés réussis ;
-- migration d’une base factice 0.8 avec jeux, profil, embedding et source ;
-- conservation de la table de jeux historique ;
-- création d’une version candidate sans écraser la version active ;
-- validation d’une candidate et classement de l’ancienne version en `superseded` ;
-- séparation des retours de similarité et de l’expérience personnelle ;
-- démarrage HTTP sur une base existante ;
-- vérification de `/healthz`, du tableau de bord, du filtre `ready`, de la fiche complète et de la page HTML.
+- syntaxe de `server.js`, `lib/database.js`, `lib/ai-engine.js` et `public/app.js` ;
+- calcul de similarité et construction du texte d’embedding ;
+- pénalisation des DLC/pages commerciales par le classement documentaire ;
+- blocage des adresses locales et privées lors de la récupération de pages ;
+- diagnostic Ollama structuré en cas de modèle absent ;
+- génération minimale Ollama sans streaming ;
+- import non destructif d’une base 0.8 ;
+- conservation de la version active pendant une réanalyse ;
+- séparation des retours personnels ;
+- détection du chemin SQLite ;
+- versionnement indépendant des dossiers documentaires ;
+- statut `insufficient` sans embedding ;
+- migration additive d’un schéma 0.9.0 vers 0.9.1.
 
 ## Résultat
 
 ```text
-tests 6
-pass 6
+tests 13
+pass 13
 fail 0
 ```
 
-## Vérification visuelle
+## Limites de la vérification locale
 
-Le HTML, les styles et le JavaScript ont été vérifiés statiquement et servis par le serveur d’intégration. Le navigateur Playwright présent dans l’environnement ne disposait pas de son binaire Chromium, donc aucune capture rendue n’a pu être produite dans cet environnement.
+Les services réels Ollama, SearXNG, Steam et les pages externes du NAS ne sont pas accessibles pendant les tests automatisés. Les connecteurs sont donc couverts par des simulations et des contrôles unitaires. La validation fonctionnelle finale doit être réalisée sur une copie du volume réel avec le pilote Euro Truck Simulator 2, Control et Satisfactory.
 
-## Vérification à faire sur les données réelles
-
-Le schéma SQLite réel du NAS n’était pas accessible depuis l’environnement de construction. La migration utilise donc une détection non destructive des noms de tables et colonnes courants. Avant déploiement définitif :
-
-1. sauvegarder le volume ;
-2. démarrer 0.9 sur une copie du volume ;
-3. comparer le nombre de jeux et de profils avec 0.8 ;
-4. vérifier au moins un profil, ses sources et une similarité ;
-5. n’effectuer une réanalyse qu’après ces contrôles.
+Aucune analyse des 4 321 jeux n’est lancée automatiquement par cette version.

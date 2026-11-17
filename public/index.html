@@ -9,7 +9,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div><span class="eyebrow">BACKLOG 0.9</span><h1>Connaissances IA</h1><p>Comprendre les jeux, vérifier les profils, affiner vos préférences.</p></div>
+    <div><span class="eyebrow">BACKLOG 0.9.1</span><h1>Connaissances IA</h1><p>Comprendre les jeux à partir de dossiers documentaires vérifiables.</p></div>
     <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
   </header>
   <nav class="tabs" aria-label="Navigation principale">
@@ -33,7 +33,7 @@
       <div class="section-head"><div><span class="eyebrow">BIBLIOTHÈQUE ENRICHIE</span><h2>Jeux et profils IA</h2></div></div>
       <form class="filterbar" id="libraryFilters">
         <label>Rechercher<input id="gameSearch" type="search" placeholder="Titre du jeu…"></label>
-        <label>Profil IA<select id="aiStatusFilter"><option value="all">Tous</option><option value="ready">Profil prêt / à vérifier</option><option value="validated">Validé</option><option value="not_analyzed">Non analysé</option><option value="analyzing">Analyse en cours</option><option value="error">Erreur</option><option value="reanalysis_requested">Réanalyse demandée</option></select></label>
+        <label>Profil IA<select id="aiStatusFilter"><option value="all">Tous</option><option value="ready">Profil prêt / à vérifier</option><option value="partial">Profil partiel</option><option value="insufficient">Profil insuffisant</option><option value="validated">Validé</option><option value="not_analyzed">Non analysé</option><option value="analyzing">Analyse en cours</option><option value="error">Erreur</option><option value="reanalysis_requested">Réanalyse demandée</option></select></label>
       </form>
       <p id="librarySummary" class="muted"></p><div id="gameGrid" class="game-grid"></div>
       <div class="button-row pagination"><button id="previousPage" class="button secondary">Page précédente</button><button id="nextPage" class="button secondary">Page suivante</button></div>
@@ -57,7 +57,7 @@
         <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
         <pre id="testResult" class="result" hidden></pre>
       </div>
-      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9 ajoute ses tables à SQLite et importe les profils 0.8 comme version initiale. Aucune table existante n’est supprimée.</p></div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.1 ajoute le versionnement des dossiers documentaires et les diagnostics structurés. Aucune table existante n’est supprimée et aucune réanalyse en masse n’est lancée.</p></div>
     </section>
   </main>
 
