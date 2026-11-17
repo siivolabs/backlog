@@ -17,6 +17,10 @@ Backlog 0.9.1 améliore la **qualité des dossiers documentaires** utilisés par
 - rendu récursif des objets historiques : plus de `[object Object]` ;
 - collecte, analyse et embedding relançables séparément ;
 - comparaison côte à côte de la version active et d’une candidate ;
+- correctif de démarrage pour les bases 0.9.0 qui possèdent encore
+  `ai_document_sources(appid, content, fetched_at, ...)` : la table historique est
+  conservée sous `ai_document_sources_legacy_v090` et le nouveau schéma est créé sans
+  perte de ligne ;
 - aucune analyse de masse au démarrage.
 
 ## Pilote recommandé
@@ -89,4 +93,4 @@ Aucune dépendance npm tierce n’est nécessaire.
 5. Reconstruire `ghcr.io/siivolabs/backlog:dev`, puis redéployer avec Dockge.
 6. Exécuter **Tester Ollama** avant toute réanalyse.
 
-Les anciennes tables, les profils 0.8/0.9.0, les corrections humaines et les préférences personnelles sont conservés.
+Les anciennes tables, les profils 0.8/0.9.0, les corrections humaines et les préférences personnelles sont conservés. Les anciennes sources documentaires restent consultables dans la table historique ; elles ne sont pas associées automatiquement à un nouveau dossier versionné, car l'ancien modèle `appid` ne permet pas de déterminer de façon fiable le `dossier_id` cible.

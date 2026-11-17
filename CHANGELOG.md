@@ -24,6 +24,10 @@
 
 ### Données
 - Migration 0.9.0 vers 0.9.1 additive et idempotente.
+- Correctif de compatibilité pour l'ancien `ai_document_sources` basé sur `appid` :
+  conservation intégrale dans `ai_document_sources_legacy_v090`, création du nouveau
+  schéma basé sur `dossier_id`, puis démarrages suivants sans renommage supplémentaire.
+- Test de régression reproduisant le schéma SQLite observé en production.
 - Aucune réanalyse en masse automatique.
 
 ## 0.9.0 — Connaissances IA vérifiables

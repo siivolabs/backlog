@@ -117,6 +117,20 @@ test('migration 0.9.0 vers 0.9.1 reste additive et conserve la version active',(
     );
     INSERT INTO ai_profile_versions(app_id,version_no,lifecycle_state,quality_status,profile_json,generated_at)
       VALUES('227300',1,'active','generated','{"summary":"profil existant"}','2026-11-17T00:00:00.000Z');
+    CREATE TABLE ai_document_sources(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      appid TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_key TEXT,
+      title TEXT,
+      url TEXT,
+      content TEXT,
+      content_hash TEXT,
+      fetched_at TEXT,
+      used_for_profile INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO ai_document_sources(appid,source_type,source_key,title,url,content,content_hash,fetched_at,used_for_profile)
+      VALUES('227300','steam','steam:227300','Steam','https://store.steampowered.com/app/227300','Description historique','hash','2026-11-17T00:00:00.000Z',1);
   `);
   old.close();
   const database=new BacklogDatabase(filename,{logger:{info(){}}});
@@ -125,6 +139,25 @@ test('migration 0.9.0 vers 0.9.1 reste additive et conserve la version active',(
     assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_profile_versions').get().count,1);
     assert.ok(database.columns('ai_profile_versions').includes('document_quality'));
     assert.ok(database.tableNames().includes('ai_document_dossiers'));
+    assert.deepEqual(database.columns('ai_document_sources'),[
+      'id','dossier_id','source_type','source_key','title','url','collected_at','excerpt',
+      'supports_json','confidence','relevance_score','retrieval_status'
+    ]);
+    assert.ok(database.tableNames().includes('ai_document_sources_legacy_v090'));
+    assert.equal(database.db.prepare('SELECT content FROM ai_document_sources_legacy_v090').get().content,'Description historique');
+    assert.equal(database.getMeta('legacy_document_sources_table'),'ai_document_sources_legacy_v090');
+    assert.equal(database.getMeta('legacy_document_sources_count'),'1');
+    const dossier=database.insertDossier('227300',{quality_status:'partial',completeness_score:50,sources:[{sourceType:'steam',excerpt:'Nouvelle description'}]});
+    assert.equal(dossier.sources.length,1);
     assert.equal(database.getMeta('schema_version'),'0.9.1');
-  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+    database.close();
+    const reopened=new BacklogDatabase(filename,{logger:{info(){}}});
+    try {
+      assert.equal(reopened.tableNames().filter((name)=>name.startsWith('ai_document_sources_legacy_v090')).length,1);
+      assert.equal(reopened.getLatestDossier('227300').sources.length,1);
+    } finally {reopened.close();}
+  } finally {
+    try { database.close(); } catch {}
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
 });
