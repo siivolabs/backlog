@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1.2 — Correctif Ollama et migration documentaire
+
+- Le diagnostic Ollama passe par `/api/chat`, désactive explicitement le raisonnement et accorde 64 tokens à la réponse minimale.
+- La validation lit `message.content`, conformément à la réponse de l’API Chat Ollama.
+- Le diagnostic distingue une réponse réellement vide d’une réponse contenant seulement du raisonnement.
+- Une table `ai_document_sources` 0.9.0 incompatible est renommée et conservée avant la création du nouveau schéma.
+- La conservation de la table historique et l’idempotence de la migration sont couvertes par des tests de régression.
+
 ## 0.9.1 — Dossiers documentaires fiables
 
 ### Diagnostic et exploitation
@@ -24,10 +32,6 @@
 
 ### Données
 - Migration 0.9.0 vers 0.9.1 additive et idempotente.
-- Correctif de compatibilité pour l'ancien `ai_document_sources` basé sur `appid` :
-  conservation intégrale dans `ai_document_sources_legacy_v090`, création du nouveau
-  schéma basé sur `dossier_id`, puis démarrages suivants sans renommage supplémentaire.
-- Test de régression reproduisant le schéma SQLite observé en production.
 - Aucune réanalyse en masse automatique.
 
 ## 0.9.0 — Connaissances IA vérifiables

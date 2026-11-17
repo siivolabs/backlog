@@ -42,11 +42,40 @@ test('Tester Ollama renvoie un diagnostic structuré quand un modèle manque',as
 
 test('Tester Ollama vérifie une génération minimale sans streaming',async()=>{
   const calls=[];
-  const fakeFetch=async(url,options={})=>{calls.push({url:String(url),body:options.body});if(String(url).endsWith('/api/tags'))return{ok:true,status:200,text:async()=>JSON.stringify({models:[{name:'qwen3:32b'},{name:'embeddinggemma:latest'}]})};return{ok:true,status:200,text:async()=>JSON.stringify({response:'OK'})};};
+  const fakeFetch=async(url,options={})=>{calls.push({url:String(url),body:options.body});if(String(url).endsWith('/api/tags'))return{ok:true,status:200,text:async()=>JSON.stringify({models:[{name:'qwen3:32b'},{name:'embeddinggemma:latest'}]})};return{ok:true,status:200,text:async()=>JSON.stringify({message:{role:'assistant',content:'OK'},done:true,done_reason:'stop'})};};
   const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
   const result=await engine.testConnection();
   assert.equal(result.ok,true);
   assert.equal(result.step,'completed');
-  const generation=JSON.parse(calls.find((call)=>call.url.endsWith('/api/generate')).body);
+  const generation=JSON.parse(calls.find((call)=>call.url.endsWith('/api/chat')).body);
   assert.equal(generation.stream,false);
+  assert.equal(generation.think,false);
+  assert.equal(generation.options.num_predict,64);
+  assert.deepEqual(generation.messages,[{role:'user',content:'Réponds uniquement avec le mot OK.'}]);
+});
+
+test('Tester Ollama explique une réponse Qwen sans contenu final',async()=>{
+  const fakeFetch=async(url)=>String(url).endsWith('/api/tags')
+    ? {ok:true,status:200,text:async()=>JSON.stringify({models:[{name:'qwen3:32b'},{name:'embeddinggemma:latest'}]})}
+    : {ok:true,status:200,text:async()=>JSON.stringify({message:{role:'assistant',content:'',thinking:'Je réfléchis'}})};
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  const result=await engine.testConnection();
+  assert.equal(result.ok,false);
+  assert.equal(result.step,'generation');
+  assert.match(result.detail,/raisonnement.*aucun contenu final/i);
+});
+
+test('l’analyse normale utilise Ollama Chat sans limite minuscule de tokens',async()=>{
+  const calls=[];
+  const fakeFetch=async(url,options={})=>{
+    calls.push({url:String(url),body:JSON.parse(options.body)});
+    return {ok:true,status:200,text:async()=>JSON.stringify({message:{content:'{}'}})};
+  };
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  await engine.generateProfile({appId:'1',name:'Jeu de test'},[]);
+  assert.equal(calls[0].url,'http://ollama:11434/api/chat');
+  assert.equal(calls[0].body.stream,false);
+  assert.equal(calls[0].body.options.temperature,0.15);
+  assert.equal('num_predict' in calls[0].body.options,false);
+  assert.deepEqual(calls[0].body.messages.map((message)=>message.role),['system','user']);
 });

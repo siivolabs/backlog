@@ -1,4 +1,4 @@
-# Vérification du livrable 0.9.1
+# Vérification du livrable 0.9.1.2
 
 ## Contrôles automatisés
 
@@ -7,7 +7,9 @@
 - pénalisation des DLC/pages commerciales par le classement documentaire ;
 - blocage des adresses locales et privées lors de la récupération de pages ;
 - diagnostic Ollama structuré en cas de modèle absent ;
-- génération minimale Ollama sans streaming ;
+- génération minimale Ollama via `/api/chat`, sans streaming ni raisonnement Qwen ;
+- diagnostic d’une réponse Ollama sans contenu final ;
+- analyse normale via `/api/chat` sans plafond de huit tokens ;
 - import non destructif d’une base 0.8 ;
 - conservation de la version active pendant une réanalyse ;
 - séparation des retours personnels ;
@@ -15,25 +17,18 @@
 - versionnement indépendant des dossiers documentaires ;
 - statut `insufficient` sans embedding ;
 - migration additive d’un schéma 0.9.0 vers 0.9.1 ;
-- reproduction du schéma observé en production (`appid`, `content`, `fetched_at`) ;
-- conservation de la ligne historique après renommage, création d'un nouveau dossier,
-  puis second démarrage sans nouveau renommage.
+- conservation idempotente d’une ancienne table `ai_document_sources` sans `dossier_id`.
 
 ## Résultat
 
 ```text
-tests 13
-pass 13
+tests 16
+pass 16
 fail 0
 ```
 
 ## Limites de la vérification locale
 
 Les services réels Ollama, SearXNG, Steam et les pages externes du NAS ne sont pas accessibles pendant les tests automatisés. Les connecteurs sont donc couverts par des simulations et des contrôles unitaires. La validation fonctionnelle finale doit être réalisée sur une copie du volume réel avec le pilote Euro Truck Simulator 2, Control et Satisfactory.
-
-Le scénario SQLite qui provoquait `no such column: dossier_id` a été reproduit
-localement avec la structure de colonnes communiquée. Le démarrage, la conservation de
-la source historique, l'insertion d'un dossier 0.9.1 et l'idempotence au redémarrage ont
-été vérifiés.
 
 Aucune analyse des 4 321 jeux n’est lancée automatiquement par cette version.
