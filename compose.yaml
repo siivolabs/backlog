@@ -4,48 +4,28 @@ services:
     container_name: backlog-test
     restart: unless-stopped
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      DB_PATH: /data/backlog.sqlite
-      STEAM_API_KEY: ${STEAM_API_KEY:-}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
-      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
-      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
-      STEAM_METADATA_CONCURRENCY: ${STEAM_METADATA_CONCURRENCY:-4}
-      STEAM_REQUEST_INTERVAL_MS: ${STEAM_REQUEST_INTERVAL_MS:-150}
-      IGDB_BATCH_SIZE: ${IGDB_BATCH_SIZE:-100}
-      IGDB_CACHE_TTL_HOURS: ${IGDB_CACHE_TTL_HOURS:-720}
-      IGDB_MISS_CACHE_TTL_HOURS: ${IGDB_MISS_CACHE_TTL_HOURS:-24}
-      METADATA_LANGUAGE: ${METADATA_LANGUAGE:-french}
-      METADATA_COUNTRY: ${METADATA_COUNTRY:-FR}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://192.168.1.77:11434}
-      OLLAMA_ANALYSIS_MODEL: ${OLLAMA_ANALYSIS_MODEL:-qwen3:32b}
-      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-embeddinggemma}
-      AI_ANALYSIS_TIMEOUT_MS: ${AI_ANALYSIS_TIMEOUT_MS:-300000}
-      AI_EMBEDDING_TIMEOUT_MS: ${AI_EMBEDDING_TIMEOUT_MS:-120000}
-      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-}
-      SEARXNG_LANGUAGE: ${SEARXNG_LANGUAGE:-fr-FR}
+      PORT: "3000"
+      DATA_DIR: "/data"
+      # Laisser vide pour la détection automatique du fichier SQLite existant.
+      DATABASE_PATH: "${DATABASE_PATH:-}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://192.168.1.77:11434}"
+      AI_ANALYSIS_MODEL: "${AI_ANALYSIS_MODEL:-qwen3:32b}"
+      AI_EMBEDDING_MODEL: "${AI_EMBEDDING_MODEL:-embeddinggemma}"
+      AI_EMBEDDING_DIMENSIONS: "${AI_EMBEDDING_DIMENSIONS:-768}"
+      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_LANGUAGE: "${SEARXNG_LANGUAGE:-fr-FR}"
     volumes:
       - ./data:/data
     networks:
       - npm_default
     read_only: true
     tmpfs:
-      - /tmp:size=16m,noexec,nosuid,nodev
+      - /tmp:rw,noexec,nosuid,size=64m
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
 
 networks:
   npm_default:

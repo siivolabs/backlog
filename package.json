@@ -1,15 +1,13 @@
 {
-  "name": "siivolabs-backlog",
-  "version": "0.8.0-poc",
+  "name": "backlog",
+  "version": "0.9.0",
   "private": true,
-  "description": "Bibliothèque Steam auto-hébergée avec synchronisation et enrichissement progressif et sélection contrôlée du POC IA",
-  "main": "server.js",
+  "description": "Bibliothèque Steam auto-hébergée et base de connaissances IA vérifiable",
   "type": "commonjs",
+  "engines": { "node": ">=24.0.0" },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test --test-reporter=spec"
-  },
-  "engines": {
-    "node": ">=24"
+    "test": "node --test --test-reporter=spec",
+    "check": "node --check server.js && node --check lib/database.js && node --check lib/ai-engine.js && node --check public/app.js"
   }
 }

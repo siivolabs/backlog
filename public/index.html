@@ -2,279 +2,73 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>Backlog — Bibliothèque Steam</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Backlog · Connaissances IA</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <main class="shell">
-    <header class="hero">
-      <div>
-        <h1><span aria-hidden="true">🎮</span> Backlog <span class="version">v0.8.0 POC</span></h1>
-        <p>Ta bibliothèque Steam, synchronisée depuis un profil public et enrichie progressivement.</p>
-      </div>
-      <div id="serviceState" class="service-state">Connexion…</div>
-    </header>
-
-    <section class="panel admin-panel" aria-labelledby="importTitle">
-      <div class="section-heading">
-        <div>
-          <span class="eyebrow">Bibliothèque Steam</span>
-          <h2 id="importTitle">Synchroniser un profil public</h2>
-        </div>
-        <span id="apiBadge" class="pill pill-neutral">Clé API : vérification…</span>
-      </div>
-      <div class="admin-grid">
-        <label class="field field-wide">
-          <span>SteamID64, nom personnalisé ou URL du profil</span>
-          <input id="profileInput" autocomplete="off" placeholder="7656119… ou https://steamcommunity.com/id/…">
-        </label>
-        <label class="field">
-          <span>Jeton d’administration</span>
-          <input id="adminToken" type="password" autocomplete="off" placeholder="ADMIN_TOKEN">
-        </label>
-        <div class="field action-field">
-          <span>&nbsp;</span>
-          <button id="syncButton" class="button button-primary" type="button">Synchroniser la bibliothèque</button>
-        </div>
-      </div>
-      <div class="panel-footer">
-        <p id="syncSummary">Aucune synchronisation chargée.</p>
-        <button id="openResetButton" class="button button-danger-quiet" type="button">Réinitialiser les données</button>
-      </div>
-      <p class="help">La clé Steam reste exclusivement dans le conteneur. Le jeton saisi ici reste en mémoire dans cet onglet et n’est jamais enregistré dans la base.</p>
-    </section>
-
-    <section class="stats" aria-label="Statistiques de la bibliothèque">
-      <article class="stat"><span>Jeux synchronisés</span><strong id="totalGames">0</strong></article>
-      <article class="stat"><span>Jamais lancés</span><strong id="neverPlayed">0</strong></article>
-      <article class="stat"><span>Heures enregistrées</span><strong id="totalHours">0</strong></article>
-      <article class="stat"><span>Jeux déjà lancés</span><strong id="playedGames">0</strong></article>
-    </section>
-
-    <section class="panel enrichment-panel" aria-labelledby="enrichmentTitle">
-      <div class="section-heading">
-        <div>
-          <span class="eyebrow">Métadonnées Steam</span>
-          <h2 id="enrichmentTitle">Enrichissement progressif</h2>
-        </div>
-        <div class="button-row">
-          <button id="retryButton" class="button button-secondary" type="button">Réessayer les erreurs</button>
-          <button id="pauseButton" class="button button-secondary" type="button" disabled>Suspendre</button>
-          <button id="startButton" class="button button-primary" type="button">Lancer</button>
-        </div>
-      </div>
-      <div class="progress-copy">
-        <span id="progressMessage">En attente d’un lancement manuel.</span>
-        <strong id="progressPercent">0 %</strong>
-      </div>
-      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div id="progressBar" class="progress-bar"></div>
-      </div>
-      <div class="status-legend" aria-label="Répartition des états">
-        <span class="legend-item"><i class="dot dot-pending"></i><b id="countPending">0</b> en attente</span>
-        <span class="legend-item"><i class="dot dot-syncing"></i><b id="countSyncing">0</b> en cours</span>
-        <span class="legend-item"><i class="dot dot-synced"></i><b id="countSynced">0</b> synchronisés</span>
-        <span class="legend-item"><i class="dot dot-error"></i><b id="countErrors">0</b> erreurs temporaires</span>
-        <span class="legend-item"><i class="dot dot-unavailable"></i><b id="countUnavailable">0</b> métadonnées introuvables</span>
+  <header class="topbar">
+    <div><span class="eyebrow">BACKLOG 0.9</span><h1>Connaissances IA</h1><p>Comprendre les jeux, vérifier les profils, affiner vos préférences.</p></div>
+    <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
+  </header>
+  <nav class="tabs" aria-label="Navigation principale">
+    <button class="tab active" data-view="dashboard">Tableau de bord</button>
+    <button class="tab" data-view="library">Bibliothèque</button>
+    <button class="tab" data-view="knowledge">Connaissances IA</button>
+    <button class="tab" data-view="errors">Erreurs</button>
+    <button class="tab" data-view="admin">Administration IA</button>
+  </nav>
+  <main>
+    <section id="dashboardView" class="view active">
+      <div class="section-head"><div><span class="eyebrow">COUVERTURE & QUALITÉ</span><h2>Tableau de bord IA</h2></div><button id="refreshDashboard" class="button secondary">Actualiser</button></div>
+      <div id="metricGrid" class="metric-grid" aria-live="polite"></div>
+      <div class="panel split-panel">
+        <div><span class="eyebrow">PROCHAINE ÉTAPE</span><h3>Réviser avant d’étendre</h3><p>Les profils générés restent distincts des connaissances validées. Commencez par les jeux que vous connaissez bien.</p></div>
+        <div class="button-row"><button class="button" data-go="knowledge">Réviser les profils</button><button class="button secondary" data-go="errors">Examiner les erreurs</button></div>
       </div>
     </section>
 
-    <section class="panel ai-pilot-panel" aria-labelledby="aiPilotTitle">
-      <div class="section-heading">
-        <div>
-          <span class="eyebrow">POC IA locale · sélection contrôlée</span>
-          <h2 id="aiPilotTitle">Choisir les jeux à analyser</h2>
-        </div>
-        <span id="aiSelectionCount" class="pill pill-neutral" aria-live="polite">0 / 50 sélectionné</span>
-      </div>
-      <p class="ai-pilot-intro">Recherche dans toute ta bibliothèque, coche les jeux souhaités ou demande une proposition diversifiée de 50 jeux. La proposition reste entièrement modifiable et aucune analyse ne démarre avant ta validation explicite.</p>
-      <div class="ai-selection-toolbar">
-        <label class="field ai-search-field">
-          <span>Rechercher dans la bibliothèque</span>
-          <input id="aiGameSearch" type="search" autocomplete="off" placeholder="Titre du jeu…">
-        </label>
-        <div class="button-row ai-selection-actions">
-          <button id="proposeAiSample" class="button button-secondary" type="button">Proposer 50 jeux diversifiés</button>
-          <button id="clearAiSelection" class="button button-secondary" type="button">Effacer</button>
-          <button id="confirmAiSelection" class="button button-primary" type="button" disabled>Valider avant analyse</button>
-        </div>
-      </div>
-      <div class="ai-selection-layout">
-        <div>
-          <div class="ai-list-heading">
-            <strong>Jeux disponibles</strong>
-            <span id="aiSearchSummary" class="help">Saisis un titre ou parcours la liste.</span>
-          </div>
-          <div id="aiGameResults" class="ai-game-results" role="group" aria-label="Jeux disponibles pour le POC"></div>
-        </div>
-        <div>
-          <div class="ai-list-heading">
-            <strong>Sélection à valider</strong>
-            <span class="help">Maximum temporaire du POC : 50</span>
-          </div>
-          <div id="aiSelectedGames" class="ai-selected-games" aria-live="polite"></div>
-        </div>
-      </div>
-      <div class="ai-selection-footer">
-        <p id="aiSelectionStatus" class="help">Aucune sélection validée. L’analyse reste bloquée.</p>
-        <p class="help"><strong>Important :</strong> la limite de 50 est uniquement un garde-fou de cette preuve de concept ; elle ne contraint pas l’architecture future.</p>
-      </div>
-      <div class="ai-analysis-console" aria-labelledby="aiAnalysisTitle">
-        <div class="section-heading">
-          <div>
-            <span class="eyebrow">Moteur d’analyse local</span>
-            <h3 id="aiAnalysisTitle">Qwen3 + embeddinggemma</h3>
-          </div>
-          <div class="button-row">
-            <button id="testAiConnection" class="button button-secondary" type="button">Tester Ollama</button>
-            <button id="startAiAnalysis" class="button button-primary" type="button" disabled>Lancer l’analyse</button>
-            <button id="pauseAiAnalysis" class="button button-secondary" type="button" disabled>Suspendre</button>
-            <button id="resumeAiAnalysis" class="button button-primary" type="button" disabled>Reprendre</button>
-          </div>
-        </div>
-        <div class="progress-copy">
-          <span id="aiProgressMessage">En attente d’un lancement manuel.</span>
-          <strong id="aiProgressPercent">0 %</strong>
-        </div>
-        <div class="progress-track" role="progressbar" aria-label="Progression de l’analyse IA" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-          <div id="aiProgressBar" class="progress-bar ai-progress-bar"></div>
-        </div>
-        <div class="status-legend" aria-label="États des profils IA">
-          <span class="legend-item"><i class="dot dot-pending"></i><b id="aiCountQueued">0</b> en attente</span>
-          <span class="legend-item"><i class="dot dot-syncing"></i><b id="aiCountAnalyzing">0</b> en cours</span>
-          <span class="legend-item"><i class="dot dot-synced"></i><b id="aiCountCompleted">0</b> profils prêts</span>
-          <span class="legend-item"><i class="dot dot-error"></i><b id="aiCountErrors">0</b> erreurs</span>
-        </div>
-        <p id="aiEngineDetails" class="help">Configuration du moteur en cours de lecture…</p>
-      </div>
+    <section id="libraryView" class="view">
+      <div class="section-head"><div><span class="eyebrow">BIBLIOTHÈQUE ENRICHIE</span><h2>Jeux et profils IA</h2></div></div>
+      <form class="filterbar" id="libraryFilters">
+        <label>Rechercher<input id="gameSearch" type="search" placeholder="Titre du jeu…"></label>
+        <label>Profil IA<select id="aiStatusFilter"><option value="all">Tous</option><option value="ready">Profil prêt / à vérifier</option><option value="validated">Validé</option><option value="not_analyzed">Non analysé</option><option value="analyzing">Analyse en cours</option><option value="error">Erreur</option><option value="reanalysis_requested">Réanalyse demandée</option></select></label>
+      </form>
+      <p id="librarySummary" class="muted"></p><div id="gameGrid" class="game-grid"></div>
+      <div class="button-row pagination"><button id="previousPage" class="button secondary">Page précédente</button><button id="nextPage" class="button secondary">Page suivante</button></div>
     </section>
 
-    <section class="panel recommendation-panel" aria-labelledby="recommendationTitle">
-      <div class="section-heading">
-        <div>
-          <span class="eyebrow">Moteur explicable</span>
-          <h2 id="recommendationTitle">Recommandations pour ta bibliothèque</h2>
-        </div>
-        <div class="button-row recommendation-controls">
-          <label class="compact-option"><input id="includePlayedRecommendations" type="checkbox"> Inclure les jeux déjà lancés</label>
-          <label class="compact-option"><input id="includeTechnicalRecommendations" type="checkbox"> Inclure les autres types</label>
-          <button id="refreshRecommendations" class="button button-secondary" type="button">Actualiser</button>
-        </div>
-      </div>
-      <p id="recommendationSummary" class="help">Les suggestions sont calculées sans hasard à partir de tes jeux, temps de jeu et métadonnées.</p>
-      <div id="recommendationGrid" class="recommendation-grid" aria-live="polite"></div>
+    <section id="knowledgeView" class="view">
+      <div class="section-head"><div><span class="eyebrow">FILE DE RÉVISION</span><h2>Base de connaissances</h2><p>Consultez la provenance et validez explicitement les analyses.</p></div></div>
+      <div id="knowledgeTable" class="table-wrap"></div>
     </section>
 
-    <section class="panel library-panel" aria-labelledby="libraryTitle">
-      <h2 id="libraryTitle" class="sr-only">Jeux de la bibliothèque</h2>
-      <div class="filters">
-        <label class="search-field">
-          <span class="sr-only">Rechercher un jeu</span>
-          <input id="searchInput" type="search" placeholder="Rechercher un jeu…">
-        </label>
-        <label><span class="sr-only">État de lecture</span><select id="playFilter"><option value="all">Tous les jeux</option><option value="unplayed">Jamais lancés</option><option value="played">Déjà lancés</option></select></label>
-        <label><span class="sr-only">État des métadonnées</span><select id="statusFilter"><option value="all">Tous les états</option><option value="pending">En attente</option><option value="syncing">En cours</option><option value="synced">Synchronisés</option><option value="temporary_error">Erreur temporaire</option><option value="unavailable">Métadonnées introuvables</option></select></label>
-        <label><span class="sr-only">Type d’application</span><select id="appTypeFilter"><option value="all">Tous les types</option><option value="full_game">Jeux complets</option><option value="demo">Démos</option><option value="beta">Bêtas</option><option value="prototype">Prototypes</option><option value="public_test">Tests publics</option><option value="dedicated_server">Serveurs dédiés</option><option value="software_tool">Logiciels et outils</option><option value="dlc">DLC</option><option value="multiplayer_component">Composants multijoueur</option><option value="unknown">Type inconnu</option></select></label>
-        <label><span class="sr-only">Genre</span><select id="genreFilter"><option value="all">Tous les genres</option></select></label>
-        <label><span class="sr-only">Tri</span><select id="sortSelect"><option value="name-asc">Nom A → Z</option><option value="name-desc">Nom Z → A</option><option value="time-desc">Temps décroissant</option><option value="time-asc">Temps croissant</option><option value="recent-desc">Joué récemment</option></select></label>
-        <label><span class="sr-only">Affichage</span><select id="viewSelect"><option value="grid">Jaquettes</option><option value="list">Liste</option></select></label>
-      </div>
+    <section id="errorsView" class="view">
+      <div class="section-head"><div><span class="eyebrow">DIAGNOSTIC</span><h2>Analyses en erreur</h2></div><button id="refreshErrors" class="button secondary">Actualiser</button></div>
+      <div id="errorList" class="error-list"></div>
+    </section>
 
-      <div id="emptyState" class="empty-state" hidden>
-        <span aria-hidden="true">📚</span>
-        <strong id="emptyTitle">La bibliothèque est vide</strong>
-        <p id="emptyText">Synchronise un profil Steam public pour afficher ses jeux.</p>
+    <section id="adminView" class="view">
+      <div class="section-head"><div><span class="eyebrow">OUTILS SECONDAIRES</span><h2>Administration IA</h2><p>Le lancement des analyses n’occupe plus l’espace principal.</p></div></div>
+      <div class="panel form-grid">
+        <label>Jeton administrateur<input id="adminToken" type="password" autocomplete="off" placeholder="Non requis si ADMIN_TOKEN est vide"></label>
+        <div><span class="label">Configuration</span><p id="engineDetails" class="muted">Chargement…</p></div>
+        <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
+        <pre id="testResult" class="result" hidden></pre>
       </div>
-      <div id="gameGrid" class="game-grid" aria-live="polite"></div>
-      <div id="pagination" class="pagination" hidden>
-        <button id="previousPage" class="button button-secondary" type="button">Précédent</button>
-        <span id="pageInfo">Page 1</span>
-        <button id="nextPage" class="button button-secondary" type="button">Suivant</button>
-      </div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9 ajoute ses tables à SQLite et importe les profils 0.8 comme version initiale. Aucune table existante n’est supprimée.</p></div>
     </section>
   </main>
 
-  <dialog id="gameDialog" class="game-dialog">
-    <form method="dialog" id="gameDetailForm">
-      <div class="dialog-heading">
-        <div>
-          <span class="eyebrow">Fiche détaillée</span>
-          <h2 id="detailTitle">Jeu</h2>
-        </div>
-        <button class="icon-button" value="cancel" aria-label="Fermer">×</button>
-      </div>
-      <div class="detail-layout">
-        <img id="detailCover" class="detail-cover" alt="">
-        <div class="detail-content">
-          <div id="detailOrigin" class="detail-origin"></div>
-          <dl id="detailFacts" class="detail-facts"></dl>
-          <p id="detailClassification" class="help"></p>
-          <p id="detailIgdbFuture" class="help"></p>
-          <div class="steam-actions" aria-label="Actions Steam">
-            <a id="playSteamButton" class="button button-primary" href="#">Jouer</a>
-            <a id="installSteamButton" class="button button-secondary" href="#">Installer</a>
-            <a id="viewSteamButton" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">Voir sur Steam</a>
-          </div>
-        </div>
-      </div>
-      <section class="ai-similar-section" aria-labelledby="similarGamesTitle">
-        <div class="dialog-heading">
-          <div>
-            <span class="eyebrow">POC IA locale</span>
-            <h3 id="similarGamesTitle">Jeux similaires dans ta bibliothèque</h3>
-          </div>
-          <span id="detailAiProfileStatus" class="pill pill-neutral">Profil non analysé</span>
-        </div>
-        <p id="similarGamesSummary" class="help">Les résultats apparaîtront après l’analyse du lot validé.</p>
-        <div id="similarGamesGrid" class="similar-games-grid" aria-live="polite"></div>
-      </section>
-      <fieldset class="manual-editor">
-        <legend>Correction manuelle</legend>
-        <p class="help">Ces valeurs ont priorité à l’affichage et dans les recommandations. Les valeurs Steam/IGDB d’origine restent conservées.</p>
-        <div class="editor-grid">
-          <label class="field field-wide"><span>Titre affiché</span><input id="editDisplayName" maxlength="300"></label>
-          <label class="field"><span>Type d’application</span><select id="editApplicationType"><option value="full_game">Jeu complet</option><option value="demo">Démo</option><option value="beta">Bêta</option><option value="prototype">Prototype</option><option value="public_test">Test public</option><option value="dedicated_server">Serveur dédié</option><option value="software_tool">Logiciel / outil</option><option value="dlc">DLC</option><option value="multiplayer_component">Composant multijoueur</option><option value="unknown">Type inconnu</option></select></label>
-          <label class="field"><span>Genres, séparés par des virgules</span><input id="editGenres"></label>
-          <label class="field"><span>Thèmes, séparés par des virgules</span><input id="editThemes"></label>
-          <label class="field"><span>Plateformes, séparées par des virgules</span><input id="editPlatforms"></label>
-        </div>
-        <div class="dialog-actions">
-          <button id="restoreSourceButton" class="button button-secondary" type="button">Rétablir les valeurs sources</button>
-          <button id="saveGameButton" class="button button-primary" type="button">Enregistrer la correction</button>
-        </div>
-      </fieldset>
-    </form>
+  <dialog id="gameDialog">
+    <div class="dialog-shell">
+      <button class="close" id="closeDialog" aria-label="Fermer">×</button>
+      <div id="dialogHero" class="dialog-hero"></div>
+      <nav class="subtabs" aria-label="Fiche du jeu"><button class="subtab active" data-panel="overview">Vue générale</button><button class="subtab" data-panel="profile">Profil IA</button><button class="subtab" data-panel="sources">Sources</button><button class="subtab" data-panel="similarities">Similarités</button><button class="subtab" data-panel="experience">Mon expérience</button><button class="subtab" data-panel="history">Historique</button></nav>
+      <div id="dialogBody" class="dialog-body"></div>
+    </div>
   </dialog>
-
-  <dialog id="resetDialog" class="reset-dialog">
-    <form method="dialog" id="resetForm">
-      <div class="dialog-heading">
-        <h2>Réinitialiser Backlog</h2>
-        <button class="icon-button" value="cancel" aria-label="Fermer">×</button>
-      </div>
-      <p>Une sauvegarde SQLite est créée avant chaque opération.</p>
-      <label class="field">
-        <span>Données à réinitialiser</span>
-        <select id="resetScope">
-          <option value="metadata">Métadonnées uniquement</option>
-          <option value="library">Bibliothèque uniquement</option>
-          <option value="all">Toutes les données applicatives</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Saisis <b>REINITIALISER</b> pour confirmer</span>
-        <input id="resetConfirmation" autocomplete="off">
-      </label>
-      <div class="dialog-actions">
-        <button class="button button-secondary" value="cancel">Annuler</button>
-        <button id="confirmResetButton" class="button button-danger" type="button">Confirmer la réinitialisation</button>
-      </div>
-    </form>
-  </dialog>
-
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
