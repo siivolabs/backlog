@@ -6,9 +6,14 @@
 - Ajoute le réseau expérimental comme sixième onglet au lieu de remplacer l’application.
 - Conserve l’administration et le contrôle `ADMIN_TOKEN` pour toutes les mutations.
 - Réutilise les tables créées par la première V0.9.4 sans supprimer de données.
-- Ajoute un remplissage d’embeddings en arrière-plan et son suivi dans l’interface.
+- Remplace le remplissage limité des embeddings par **Compléter le réseau**, un traitement par lot des jeux sélectionnés.
+- Réutilise les profils et embeddings déjà exploitables.
+- Convertit les anciens profils V1 reconnus vers un socle commun auditable, sans réécrire leur JSON source.
+- Régénère uniquement les profils réellement insuffisants avec Qwen3 et crée leurs embeddings avec EmbeddingGemma.
+- Enregistre les régénérations comme versions supplémentaires sans promotion ni validation jeu par jeu.
+- Recalcule automatiquement toutes les paires après le lot et conserve l’historique détaillé de chaque exécution.
 - Utilise les profils candidats à titre expérimental sans les promouvoir.
-- Ajoute trois tests de non-régression et d’idempotence.
+- Porte la suite à 49 tests, dont conversion V1, orchestration du lot, scénario complet de 50 jeux/1 225 paires, reprise idempotente et opération IA réseau.
 
 ## 0.9.3.2 — Consolidation sûre des preuves dupliquées
 

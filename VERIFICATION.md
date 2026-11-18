@@ -3,9 +3,13 @@
 ## Contrôles automatisés
 
 - syntaxe de tous les modules serveur, réseau et interface ;
-- 44 tests réussis : 41 tests hérités de V0.9.3.2 et 3 tests d’intégration du réseau ;
+- 49 tests réussis ;
 - migration du réseau idempotente ;
 - profil candidat utilisable sans changement de son état ;
+- conversion d’un profil V1 imbriqué vers les 11 dimensions communes sans exploiter les métadonnées de source ;
+- orchestration complète : réutilisation, conversion, embedding, régénération et recalcul des paires ;
+- opération IA `network` vérifiée avec Qwen3 puis EmbeddingGemma, sans promotion de la candidate ;
+- reprise idempotente sans nouvelle version de profil ;
 - application complète et réseau sur la même base SQLite.
 
 ## Contrôles fonctionnels attendus

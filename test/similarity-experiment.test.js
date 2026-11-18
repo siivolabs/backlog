@@ -79,7 +79,8 @@ test('la migration du réseau est idempotente avec les tables créées par la pr
   try {
     assert.equal(reopened.getSelectedAppIds().length, 5);
     assert.doesNotThrow(() => reopened.migrate());
-    assert.equal(reopened.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name LIKE '%v094%'").get().count, 3);
+    const tables = new Set(reopened.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%v094%'").all().map((row) => row.name));
+    for (const name of ['similarity_edges_v094','recommendation_feedback_v094','similarity_runs_v094','similarity_profile_adapters_v0941','similarity_completion_runs_v0941','similarity_completion_items_v0941']) assert.ok(tables.has(name));
   } finally {
     reopened.close(); database.close(); fs.rmSync(directory, { recursive: true, force: true });
   }

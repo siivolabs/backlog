@@ -8,6 +8,7 @@ const { BacklogDatabase, resolveDatabasePath } = require('./lib/database');
 const { AiEngine } = require('./lib/ai-engine');
 const { SimilarityExperiment } = require('./lib/similarity-experiment');
 const { OllamaClient } = require('./lib/network-ollama');
+const { NetworkCompletionService } = require('./lib/network-completion');
 
 const VERSION = '0.9.4.1';
 const PORT = Number(process.env.PORT || 3000);
@@ -20,6 +21,11 @@ const similarityExperiment = new SimilarityExperiment(databasePath, {
   useDraftProfiles: String(process.env.USE_DRAFT_PROFILES || 'true').toLowerCase() !== 'false'
 });
 const networkOllama = new OllamaClient(aiEngine.config.ollamaBaseUrl, aiEngine.config.embeddingModel);
+const networkCompletion = new NetworkCompletionService({
+  experiment: similarityExperiment, database, aiEngine, embeddingClient: networkOllama,
+  pollIntervalMs: Number(process.env.NETWORK_JOB_POLL_MS || 500),
+  jobTimeoutMs: Number(process.env.NETWORK_GAME_TIMEOUT_MS || 45 * 60 * 1000)
+});
 let networkJob = null;
 aiEngine.start();
 
@@ -103,6 +109,7 @@ async function api(req,res,url) {
   if(method==='GET'&&pathname==='/api/v09/network/dashboard') return send(res,200,similarityExperiment.dashboard());
   if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000))});
   if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:networkJob});
+  if(method==='GET'&&pathname==='/api/v09/network/completion/plan') return send(res,200,{items:networkCompletion.publicPlan()});
   match=pathname.match(/^\/api\/v09\/network\/games\/([^/]+)\/similar$/);
   if(method==='GET'&&match) return send(res,200,{appId:decodeURIComponent(match[1]),recommendations:similarityExperiment.recommendations(decodeURIComponent(match[1]),Number(url.searchParams.get('limit')||5))});
   if(method==='POST'&&pathname==='/api/v09/network/selection'){
@@ -125,6 +132,21 @@ async function api(req,res,url) {
     setImmediate(async()=>{
       try { const result=await networkOllama.backfill(similarityExperiment,limit,(progress)=>{networkJob={...networkJob,...progress};}); networkJob={...networkJob,status:'completed',finishedAt:new Date().toISOString(),result}; }
       catch(error){ console.error(error); networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)}; }
+    });
+    return send(res,202,{job:networkJob});
+  }
+  if(method==='POST'&&pathname==='/api/v09/network/complete'){
+    requireAdmin(req);
+    if(networkJob?.status==='running'||networkCompletion.running) throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
+    const plan=networkCompletion.publicPlan();
+    networkJob={type:'completion',status:'running',phase:'planning',startedAt:new Date().toISOString(),current:0,total:plan.length,plan};
+    setImmediate(async()=>{
+      try {
+        const result=await networkCompletion.run({onProgress:(progress)=>{networkJob={...networkJob,...progress,status:'running'};}});
+        networkJob={...networkJob,status:result.status,phase:'completed',finishedAt:new Date().toISOString(),current:result.selected,total:result.selected,result};
+      } catch(error) {
+        console.error(error);networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)};
+      }
     });
     return send(res,202,{job:networkJob});
   }
@@ -164,4 +186,4 @@ server.listen(PORT,'0.0.0.0',()=>{
 function shutdown(){ aiEngine.stop(); server.close(()=>{similarityExperiment.close();database.close();process.exit(0);}); setTimeout(()=>process.exit(1),5000).unref(); }
 process.on('SIGTERM',shutdown); process.on('SIGINT',shutdown);
 
-module.exports={server,database,aiEngine,similarityExperiment,VERSION};
+module.exports={server,database,aiEngine,similarityExperiment,networkCompletion,VERSION};

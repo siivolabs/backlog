@@ -19,7 +19,8 @@ Un sixième onglet **Réseau de similarité** permet de :
 
 - sélectionner le périmètre expérimental (50 jeux par défaut) ;
 - utiliser le meilleur profil `active` ou `draft` sans le promouvoir ;
-- compléter volontairement les embeddings manquants ;
+- compléter tout le réseau en une seule opération : réutilisation, conversion des anciens profils, régénération Qwen3 si nécessaire et embeddings EmbeddingGemma ;
+- suivre le traitement jeu par jeu sans validation manuelle obligatoire ;
 - calculer toutes les paires du périmètre ;
 - consulter le Top 5, les ressemblances et les différences ;
 - enregistrer une évaluation séparée des goûts personnels ;
@@ -35,8 +36,11 @@ La migration est additive. Elle crée ou réutilise uniquement :
 - `similarity_edges_v094`
 - `recommendation_feedback_v094`
 - `similarity_runs_v094`
+- `similarity_profile_adapters_v0941`
+- `similarity_completion_runs_v0941`
+- `similarity_completion_items_v0941`
 
-Elle ne supprime aucune table et ne modifie aucun état `active`, `draft`, `superseded` ou `rejected`. Le champ `embedding_json` n’est mis à jour que lorsqu’un administrateur lance explicitement **Compléter les embeddings**.
+Elle ne supprime aucune table et ne promeut aucun profil. Les anciens profils convertibles restent inchangés : leur représentation comparable est enregistrée séparément dans `similarity_profile_adapters_v0941`. Le champ `embedding_json` n’est mis à jour que pour un profil exploitable dépourvu de vecteur. Une régénération Qwen3 crée une version supplémentaire `draft` lorsqu’une version active existe.
 
 Les tables déjà créées par la première V0.9.4 sont réutilisées de façon idempotente.
 
@@ -74,8 +78,8 @@ User=1000:1000 CapDrop=["ALL"] ReadOnly=true
 2. Ouvrir **Administration IA**, saisir le jeton et tester Ollama.
 3. Ouvrir **Réseau de similarité**.
 4. Vérifier ou modifier la sélection de 50 jeux.
-5. Lancer **Compléter les embeddings** si nécessaire.
-6. Lancer **Recalculer le réseau**.
+5. Lancer **Compléter le réseau**. L’opération réutilise ce qui est déjà exploitable, convertit les profils historiques reconnus, régénère uniquement les profils insuffisants, crée les embeddings manquants puis recalcule les similarités.
+6. Utiliser **Recalculer le réseau** uniquement après une modification manuelle de la sélection ou des profils.
 7. Évaluer les cinq voisins de quelques jeux connus.
 
 ## Variables du réseau
@@ -84,6 +88,9 @@ User=1000:1000 CapDrop=["ALL"] ReadOnly=true
 |---|---:|---|
 | `EXPERIMENT_SIZE` | `50` | taille de la sélection initiale |
 | `USE_DRAFT_PROFILES` | `true` | autoriser les candidats dans le laboratoire |
+| `NETWORK_USABLE_THRESHOLD` | `0.45` | complétude minimale du socle comparable avant régénération |
+| `NETWORK_JOB_POLL_MS` | `500` | intervalle interne de suivi d’une régénération Qwen3 |
+| `NETWORK_GAME_TIMEOUT_MS` | `2700000` | délai maximal d’une régénération par jeu |
 | `USEFUL_SIMILARITY_THRESHOLD` | `0.55` | seuil provisoire de densité utile |
 | `AI_EMBEDDING_TIMEOUT_MS` | `120000` | délai maximal par requête d’embedding |
 
@@ -96,4 +103,4 @@ npm test
 npm run check
 ```
 
-La livraison comprend les 41 tests de V0.9.3.2 et 3 tests supplémentaires couvrant l’intégration, la non-promotion des candidats et l’idempotence de la migration V0.9.4.
+La livraison comprend **49 tests** couvrant les fonctions historiques, l’intégration du réseau, la conversion des profils V1, la régénération Qwen3, la création d’embeddings EmbeddingGemma, la non-promotion des candidats, la reprise idempotente et la migration SQLite additive.

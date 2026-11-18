@@ -48,8 +48,8 @@
 
     <section id="networkView" class="view">
       <div class="section-head">
-        <div><span class="eyebrow">LABORATOIRE INTÉGRÉ</span><h2>Réseau expérimental de similarité</h2><p>Mesurer la couverture, la qualité et l’utilité des recommandations sans remplacer les profils ni leur cycle de validation.</p></div>
-        <div class="button-row"><button id="networkEmbedBtn" class="button secondary">Compléter les embeddings</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
+        <div><span class="eyebrow">LABORATOIRE INTÉGRÉ</span><h2>Réseau expérimental de similarité</h2><p>Réutiliser les profils existants, convertir les anciens profils exploitables et régénérer automatiquement les profils réellement insuffisants sans modifier leur cycle de validation.</p></div>
+        <div class="button-row"><button id="networkCompleteBtn" class="button secondary">Compléter le réseau</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
       </div>
       <div id="networkJob" class="panel network-job" hidden></div>
       <div class="network-axis-grid">
@@ -84,7 +84,7 @@
         <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
         <pre id="testResult" class="result" hidden></pre>
       </div>
-      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.4.1 conserve les preuves par caractéristique, la vérification factuelle et la réutilisation des corrections humaines sans réécrire les profils existants. Aucune table n’est supprimée et aucune réanalyse en masse n’est lancée.</p></div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.4.1 conserve les preuves par caractéristique, la vérification factuelle et la réutilisation des corrections humaines sans réécrire les profils existants. Aucune table n’est supprimée. La complétion par lot ne démarre qu’après l’action explicite « Compléter le réseau ».</p></div>
     </section>
   </main>
 
