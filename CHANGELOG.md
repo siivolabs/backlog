@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.2 — Profils d’expérience multidimensionnels
+
+- Nouveau schéma de profil 2.0 avec objets stricts par dimension.
+- Provenance documentaire maintenue exclusivement dans `field_status`.
+- Rejet des statuts documentaires employés comme contenu de profil.
+- Validation croisée des valeurs inconnues, des `SOURCE-N` et de la richesse sémantique.
+- Scores séparés pour dossier, profil, sémantique et couverture des preuves.
+- Refus de validation et d’embedding pour un profil sémantiquement insuffisant.
+- Migration SQLite additive préservant intégralement les profils historiques.
+- Pilotes de contrat pour Euro Truck Simulator 2, Control et Satisfactory.
+
 ## 0.9.1.2 — Correctif Ollama et migration documentaire
 
 - Le diagnostic Ollama passe par `/api/chat`, désactive explicitement le raisonnement et accorde 64 tokens à la réponse minimale.

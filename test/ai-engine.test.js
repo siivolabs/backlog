@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cosine, profileText, PROFILE_SCHEMA } = require('../lib/ai-engine');
+const { cosine, profileText, PROFILE_SCHEMA, PROFILE_FORMAT, PROFILE_SCHEMA_VERSION } = require('../lib/ai-engine');
 
 test('cosine calcule la similarité et refuse les dimensions incohérentes',()=>{
   assert.equal(cosine([1,0],[1,0]),1);
@@ -11,9 +11,9 @@ test('cosine calcule la similarité et refuse les dimensions incohérentes',()=>
 });
 
 test('profileText conserve toutes les dimensions utiles à l’embedding',()=>{
-  const profile={...PROFILE_SCHEMA,summary:'Résumé',gameplay_loops:['Boucle'],narrative:'Narration',atmosphere_themes:['Mystère'],distinctive_elements:['Élément']};
+  const profile={...PROFILE_SCHEMA,summary:'Résumé',gameplay_loops:[{action:'Conduire',objective:'Livrer',description:'Acheminer des marchandises entre plusieurs villes.'}],narrative:{description:'Une narration décrite de façon structurée.'},atmosphere_themes:{description:'Une ambiance mystérieuse et enveloppante.'},distinctive_elements:[{element:'Portails',description:'Manipulation spatiale au cœur des énigmes.'}]};
   const text=profileText(profile);
-  for(const value of ['Résumé','Boucle','Narration','Mystère','Élément'])assert.match(text,new RegExp(value));
+  for(const value of ['Résumé','Conduire','structurée','mystérieuse','Portails'])assert.match(text,new RegExp(value,'i'));
 });
 
 const { AiEngine, sourceRelevance, isPrivateIp } = require('../lib/ai-engine');
@@ -75,7 +75,10 @@ test('l’analyse normale utilise Ollama Chat sans limite minuscule de tokens',a
   await engine.generateProfile({appId:'1',name:'Jeu de test'},[]);
   assert.equal(calls[0].url,'http://ollama:11434/api/chat');
   assert.equal(calls[0].body.stream,false);
-  assert.equal(calls[0].body.options.temperature,0.15);
+  assert.equal(calls[0].body.options.temperature,0.1);
+  assert.equal(calls[0].body.think,false);
+  assert.equal(calls[0].body.format.properties.schema_version.enum[0],PROFILE_SCHEMA_VERSION);
+  assert.equal(PROFILE_FORMAT.properties.pace.anyOf[0].type,'object');
   assert.equal('num_predict' in calls[0].body.options,false);
   assert.deepEqual(calls[0].body.messages.map((message)=>message.role),['system','user']);
 });

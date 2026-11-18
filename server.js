@@ -7,7 +7,7 @@ const { URL } = require('node:url');
 const { BacklogDatabase, resolveDatabasePath } = require('./lib/database');
 const { AiEngine } = require('./lib/ai-engine');
 
-const VERSION = '0.9.1.2';
+const VERSION = '0.9.2';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);

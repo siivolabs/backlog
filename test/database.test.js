@@ -125,7 +125,7 @@ test('migration 0.9.0 vers 0.9.1 reste additive et conserve la version active',(
     assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_profile_versions').get().count,1);
     assert.ok(database.columns('ai_profile_versions').includes('document_quality'));
     assert.ok(database.tableNames().includes('ai_document_dossiers'));
-    assert.equal(database.getMeta('schema_version'),'0.9.1');
+    assert.equal(database.getMeta('schema_version'),'0.9.2');
   } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -165,5 +165,36 @@ test('migration 0.9.1 conserve une ancienne table ai_document_sources incompatib
     assert.equal(database.getMeta('legacy_document_sources_table'),'ai_document_sources_legacy_v090');
     assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_document_sources_legacy_v090').get().count,1);
     assert.equal(database.tableNames().filter((name)=>name.startsWith('ai_document_sources_legacy_v090')).length,1);
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+
+test('migration 0.9.2 ajoute la qualité sémantique sans réécrire les profils existants',()=>{
+  const {database,dir,profile}=fixture();
+  try {
+    const legacy=database.getActiveProfile('400');
+    assert.deepEqual(JSON.parse(legacy.profile_json),profile);
+    assert.equal(legacy.profile_schema_version,'legacy');
+    assert.equal(legacy.profile_quality,null);
+    const candidate=database.insertProfileVersion({
+      appId:'400',profile:{schema_version:'2.0',summary:'Profil structuré conservé séparément.'},
+      profileSchemaVersion:'2.0',profileQuality:'partial',profileCompletenessScore:68,
+      semanticQualityScore:64,evidenceCoverage:90,documentQuality:'complete',completenessScore:92
+    });
+    assert.equal(candidate.profile_schema_version,'2.0');
+    assert.equal(candidate.profile_quality,'partial');
+    assert.equal(candidate.profile_completeness_score,68);
+    assert.equal(candidate.semantic_quality_score,64);
+    assert.equal(candidate.evidence_coverage,90);
+    assert.equal(database.getActiveProfile('400').id,legacy.id);
+    assert.equal(database.getMeta('schema_version'),'0.9.2');
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('refuse de valider un profil sémantiquement insuffisant',()=>{
+  const {database,dir}=fixture();
+  try {
+    const candidate=database.insertProfileVersion({appId:'400',profile:{schema_version:'2.0'},documentQuality:'complete',completenessScore:95,profileQuality:'insufficient',profileCompletenessScore:25,lifecycleState:'draft'});
+    assert.throws(()=>database.reviewProfile(candidate.id,{action:'validate'}),/sémantiquement insuffisant/i);
   } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
