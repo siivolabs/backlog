@@ -103,3 +103,12 @@ test('le détail d’une erreur de chemin est lisible sans consulter les logs Do
   assert.match(detail,/Chemin attendu : atmosphere_themes\.tone/);
   assert.match(detail,/Réparation contrôlée : tentée sans succès/);
 });
+
+test('le détail d’une collision incompatible explique les supports et les sources',()=>{
+  const error=new ProfileValidationError('summary: preuves incompatibles pour un même chemin (summary)',{code:'CONFLICTING_EVIDENCE_CLAIMS',details:{dimension:'summary',received:'summary',conflicting_supports:['direct','contradictory'],conflicting_source_ids:['SOURCE-1','SOURCE-2'],conflict_reason:'Les sources ne soutiennent pas la même valeur.'}});
+  const detail=formatAnalysisError(error,'path_repair');
+  assert.match(detail,/Code : CONFLICTING_EVIDENCE_CLAIMS/);
+  assert.match(detail,/Supports incompatibles : direct, contradictory/);
+  assert.match(detail,/Sources concernées : SOURCE-1, SOURCE-2/);
+  assert.match(detail,/Motif : Les sources ne soutiennent pas la même valeur/);
+});

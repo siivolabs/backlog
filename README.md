@@ -1,13 +1,16 @@
-# Backlog 0.9.3.1
+# Backlog 0.9.3.2
 
-Backlog 0.9.3.1 est le correctif de fiabilité de la 0.9.3. Il conserve le schéma de profil 2.1 et les données SQLite existantes, tout en empêchant une faute de nomenclature dans un chemin de preuve de faire échouer inutilement une analyse.
+Backlog 0.9.3.2 complète la réparation des chemins introduite en 0.9.3.1. Il conserve le schéma de profil 2.1 et les données SQLite existantes, mais consolide désormais les preuves compatibles lorsque la normalisation ou la réparation produit plusieurs `claims` pour le même chemin.
 
-## Correctifs 0.9.3.1
+## Correctifs 0.9.3.2
 
 - normalisation déterministe des alias explicitement autorisés, dont `atmosphere_theme.*` vers `atmosphere_themes.*` ;
 - validation stricte de l’existence réelle de chaque chemin dans le profil généré ;
 - une seule tentative de réparation Qwen pour les chemins encore invalides, avec sortie limitée à des couples `from`/`to` ;
 - application d’une réparation uniquement si la cible appartient aux chemins autorisés de la même dimension ;
+- consolidation avant validation des preuves compatibles qui aboutissent au même chemin ;
+- union déterministe de leurs `source_ids`, conservation de toutes les notes et confiance fusionnée volontairement prudente ;
+- rejet structuré des collisions mêlant une preuve contradictoire à une preuve favorable, ou une correction humaine à une preuve documentaire ;
 - rejet inchangé du profil lorsqu’une réparation est absente, ambiguë, hors dimension ou hors schéma ;
 - affichage du code, de l’étape et du détail complet de l’erreur dans la fiche du jeu et la vue **Erreurs** ;
 - aucune modification du schéma SQLite 0.9.3 et aucune réécriture des profils existants.
@@ -80,17 +83,18 @@ Chaque dimension conserve un résumé de provenance compatible avec la 0.9.2, ma
 }
 ```
 
-`source_ids` doit être exactement l’union des sources réellement utilisées par les `claims`. Une correction humaine peut utiliser `support: "human"` sans `SOURCE-N`.
+`source_ids` doit être exactement l’union des sources réellement utilisées par les `claims`. Un chemin ne peut apparaître qu’une fois : lorsque plusieurs sources compatibles soutiennent la même valeur, Backlog les regroupe dans ce `claim` unique. Une correction humaine peut utiliser `support: "human"` sans `SOURCE-N`, mais n’est jamais fusionnée avec une preuve documentaire.
 
 ## Pipeline de fiabilité
 
 1. construction ou réutilisation du dossier documentaire ;
 2. chargement des notes de révision et corrections antérieures du jeu ;
 3. génération du profil 2.1 ;
-4. validation déterministe du schéma, des chemins et des sources ;
-5. vérification factuelle Qwen indépendante ;
-6. calcul séparé de la sémantique, de la couverture, de la précision des preuves et de l’exactitude factuelle ;
-7. embedding seulement si le dossier et le profil sont suffisants **et** si la vérification retourne `passed`.
+4. normalisation des chemins et consolidation déterministe des preuves compatibles ;
+5. validation stricte du schéma, des chemins et des sources ;
+6. vérification factuelle Qwen indépendante ;
+7. calcul séparé de la sémantique, de la couverture, de la précision des preuves et de l’exactitude factuelle ;
+8. embedding seulement si le dossier et le profil sont suffisants **et** si la vérification retourne `passed`.
 
 Un profil peut donc être structurellement complet tout en restant bloqué pour anomalie factuelle.
 
@@ -129,7 +133,7 @@ Un profil peut donc être structurellement complet tout en restant bloqué pour 
 ```bash
 npm run check
 npm test
-DATA_DIR=/tmp/backlog-v0931 PORT=3000 node server.js
+DATA_DIR=/tmp/backlog-v0932 PORT=3000 node server.js
 curl http://127.0.0.1:3000/healthz
 ```
 

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { AiEngine, validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths } = require('../lib/ai-engine');
+const { AiEngine, validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths, mergeCompatibleEvidenceClaims } = require('../lib/ai-engine');
 
 const evidence = (status='documented', source_ids=['SOURCE-1'], note='Caractéristique établie par le dossier documentaire.', path='summary') => ({status,source_ids,confidence:status==='unknown'?'unknown':'high',note,claims:status==='unknown'?[]:[{path,source_ids,support:status==='human_corrected'?'human':'direct',confidence:'high',note:'La caractéristique est soutenue par la preuve indiquée.'}]});
 
@@ -129,4 +129,66 @@ test('une proposition de réparation hors schéma est ignorée puis rejetée',as
   const fakeFetch=async()=>({ok:true,status:200,text:async()=>JSON.stringify({message:{content:JSON.stringify({repairs:[{dimension:'atmosphere_themes',from:'atmosphere_themes.descriptio',to:'progression.description'}]})}})});
   const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
   await assert.rejects(()=>engine.repairEvidencePaths(profile),(error)=>error.code==='INVALID_EVIDENCE_PATH'&&error.details.repair_attempted===true);
+});
+
+test('fusionne les preuves compatibles d’un chemin sans perdre leurs sources ni leurs notes',()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.summary.source_ids=['SOURCE-1','SOURCE-2'];
+  profile.field_status.summary.claims.push({path:'summary',source_ids:['SOURCE-2'],support:'indirect',confidence:'medium',note:'Une seconde source confirme indirectement le même résumé.'});
+  const before=structuredClone(profile);
+  const result=mergeCompatibleEvidenceClaims(profile);
+  assert.equal(result.profile.field_status.summary.claims.length,1);
+  assert.deepEqual(result.profile.field_status.summary.claims[0].source_ids,['SOURCE-1','SOURCE-2']);
+  assert.equal(result.profile.field_status.summary.claims[0].support,'direct');
+  assert.equal(result.profile.field_status.summary.claims[0].confidence,'medium','la confiance fusionnée reste conservatrice');
+  assert.match(result.profile.field_status.summary.claims[0].note,/soutenue par la preuve/);
+  assert.match(result.profile.field_status.summary.claims[0].note,/seconde source/);
+  assert.equal(result.merges.length,1);
+  assert.deepEqual(profile,before,'la consolidation ne mute pas la réponse reçue');
+  assert.equal(validateProfileContent(result.profile,{sourceCount:2}),true);
+});
+
+test('déduplique une collision créée par un alias connu sans appeler Qwen',async()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  const evidenceBlock=profile.field_status.atmosphere_themes;
+  evidenceBlock.source_ids=['SOURCE-1','SOURCE-2'];
+  evidenceBlock.claims.push({path:'atmosphere_theme.description',source_ids:['SOURCE-2'],support:'direct',confidence:'high',note:'La source complémentaire décrit la même ambiance.'});
+  let calls=0;
+  const engine=new AiEngine({database:{},fetchImpl:async()=>{calls+=1;throw new Error('Qwen ne doit pas être appelé');},env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  const result=await engine.repairEvidencePaths(profile);
+  assert.equal(calls,0);
+  assert.equal(result.repairAttempted,false);
+  assert.equal(result.repairs.length,1);
+  assert.equal(result.claimMerges.length,1);
+  assert.equal(result.profile.field_status.atmosphere_themes.claims.length,1);
+  assert.deepEqual(result.profile.field_status.atmosphere_themes.claims[0].source_ids,['SOURCE-1','SOURCE-2']);
+  assert.equal(validateProfileContent(result.profile,{sourceCount:2}),true);
+});
+
+test('déduplique une collision créée par la réparation Qwen contrôlée',async()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.summary.source_ids=['SOURCE-1','SOURCE-2'];
+  profile.field_status.summary.claims.push({path:'summry',source_ids:['SOURCE-2'],support:'direct',confidence:'high',note:'La seconde source décrit le même résumé.'});
+  const fakeFetch=async()=>({ok:true,status:200,text:async()=>JSON.stringify({message:{content:JSON.stringify({repairs:[{dimension:'summary',from:'summry',to:'summary'}]})}})});
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  const result=await engine.repairEvidencePaths(profile);
+  assert.equal(result.repairAttempted,true);
+  assert.equal(result.repairs.at(-1).to,'summary');
+  assert.equal(result.claimMerges.length,1);
+  assert.equal(result.profile.field_status.summary.claims.length,1);
+  assert.deepEqual(result.profile.field_status.summary.claims[0].source_ids,['SOURCE-1','SOURCE-2']);
+  assert.equal(validateProfileContent(result.profile,{sourceCount:2}),true);
+});
+
+test('refuse de fusionner une preuve contradictoire avec une preuve qui soutient la valeur',()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.summary.source_ids=['SOURCE-1','SOURCE-2'];
+  profile.field_status.summary.claims.push({path:'summary',source_ids:['SOURCE-2'],support:'contradictory',confidence:'high',note:'La seconde source contredit la valeur retenue.'});
+  assert.throws(()=>mergeCompatibleEvidenceClaims(profile),(error)=>error.code==='CONFLICTING_EVIDENCE_CLAIMS'&&error.details.dimension==='summary'&&error.details.received==='summary'&&error.details.conflicting_supports.includes('contradictory'));
+});
+
+test('refuse de confondre une correction humaine et une preuve documentaire sur le même chemin',()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.summary.claims.push({path:'summary',source_ids:[],support:'human',confidence:'high',note:'La valeur a aussi été corrigée manuellement.'});
+  assert.throws(()=>mergeCompatibleEvidenceClaims(profile),(error)=>error.code==='CONFLICTING_EVIDENCE_CLAIMS'&&error.details.conflicting_supports.includes('human'));
 });

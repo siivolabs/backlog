@@ -1,11 +1,11 @@
-# Vérification du livrable 0.9.3.1
+# Vérification du livrable 0.9.3.2
 
 ## Provenance
 
-Le correctif a été construit à partir de l’archive publiée `backlog-v0.9.3.zip`, dont le SHA-256 a été vérifié avant extraction :
+Le correctif a été construit à partir de l’archive publiée `backlog-v0.9.3.1.zip`, dont le SHA-256 a été vérifié avant extraction :
 
 ```text
-a6a6a3e0349e5e85ddea9de1238cb0cef2c194e0efbad47327677db1b1002999
+29394c1ecf69387b41fddb69aa3a2239e0995c4e886a100bf1c377069055a319
 ```
 
 L’archive source a passé `unzip -t` sans erreur.
@@ -19,6 +19,10 @@ L’archive source a passé `unzip -t` sans erreur.
 - tentative Qwen unique et à température zéro pour un chemin non couvert par un alias ;
 - application limitée à une cible présente dans `allowed_paths` pour la même dimension ;
 - rejet d’une cible hors dimension ou hors schéma ;
+- fusion des doublons compatibles déjà valides, créés par un alias connu ou créés par la réparation Qwen ;
+- union des sources, conservation des notes, sélection du support direct et de la confiance la plus prudente ;
+- rejet structuré des mélanges `contradictory`/favorable et `human`/documentaire ;
+- absence de mutation de la réponse brute pendant la consolidation ;
 - conservation des contrôles de type, contenu, sources, preuves, qualité et vérification factuelle 0.9.3 ;
 - rendu du code, de l’étape et du détail de l’erreur dans la fiche du jeu et la vue **Erreurs** ;
 - migrations SQLite historiques, conservation des profils actifs, candidates, sources, corrections, embeddings et données joueur.
@@ -27,8 +31,8 @@ L’archive source a passé `unzip -t` sans erreur.
 
 ```text
 npm run check : succès
-tests 35
-pass 35
+tests 41
+pass 41
 fail 0
 ```
 
@@ -37,14 +41,14 @@ fail 0
 Le serveur a été démarré avec un SQLite neuf et isolé. Les assertions ont réussi :
 
 ```json
-{"status":"ok","version":"0.9.3.1","database":"backlog.sqlite"}
+{"status":"ok","version":"0.9.3.2","database":"backlog.sqlite"}
 ```
 
-L’endpoint de configuration a également renvoyé `version: "0.9.3.1"`, `qwen3:32b`, `embeddinggemma` et le nom du fichier SQLite attendu.
+L’endpoint de configuration a également renvoyé `version: "0.9.3.2"`, `qwen3:32b`, `embeddinggemma` et le nom du fichier SQLite attendu.
 
 ## Compatibilité SQLite
 
-Le correctif ne modifie pas `lib/database.js`. La valeur `schema_version=0.9.3` reste volontairement le marqueur du schéma SQLite partagé par 0.9.3 et 0.9.3.1. Les tests ouvrent et migrent des bases historiques, vérifient les comptes et le contenu existants, et confirment qu’une réanalyse conserve la version active jusqu’à validation humaine.
+Le correctif ne modifie pas `lib/database.js`. La valeur `schema_version=0.9.3` reste volontairement le marqueur du schéma SQLite partagé par 0.9.3, 0.9.3.1 et 0.9.3.2. Les tests ouvrent et migrent des bases historiques, vérifient les comptes et le contenu existants, et confirment qu’une réanalyse conserve la version active jusqu’à validation humaine.
 
 ## Limites de la vérification locale
 

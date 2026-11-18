@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.3.2 — Consolidation sûre des preuves dupliquées
+
+- Un seul `claim` est conservé par chemin après normalisation des alias et après réparation Qwen.
+- Les preuves compatibles fusionnent leurs `source_ids` sans perdre les notes ; `direct` prévaut sur `indirect` et la confiance retenue reste la plus prudente.
+- Les collisions créées par `atmosphere_theme.*` → `atmosphere_themes.*` ou par une réparation Qwen sont consolidées avant la validation stricte.
+- Une preuve `contradictory` n’est jamais fusionnée silencieusement avec une preuve qui soutient la valeur.
+- Une correction `human` n’est jamais confondue avec une preuve documentaire sur le même chemin.
+- Les incompatibilités retournent le code structuré `CONFLICTING_EVIDENCE_CLAIMS`, avec dimension, chemin, supports, sources et motif visibles dans l’interface.
+- Le prompt demande désormais explicitement à Qwen de regrouper toutes les sources d’un même chemin dans une seule preuve.
+- Schéma de profil 2.1 et schéma SQLite 0.9.3 inchangés ; aucune donnée historique réécrite.
+- Tests de non-régression portés de 35 à 41 cas.
+
 ## 0.9.3.1 — Correctif des chemins de preuve
 
 - Alias explicite `atmosphere_theme.*` → `atmosphere_themes.*` avant validation.
