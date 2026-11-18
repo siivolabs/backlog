@@ -1,150 +1,113 @@
-# Backlog 0.9.3.2
+# Backlog V0.9.4 — Réseau expérimental de similarité
 
-Backlog 0.9.3.2 complète la réparation des chemins introduite en 0.9.3.1. Il conserve le schéma de profil 2.1 et les données SQLite existantes, mais consolide désormais les preuves compatibles lorsque la normalisation ou la réparation produit plusieurs `claims` pour le même chemin.
+Cette livraison ajoute un laboratoire **non destructif** à Backlog V0.9.3.2. Elle utilise la même base SQLite, accepte les profils `active` et `draft`, construit un profil commun, calcule toutes les paires du périmètre et enregistre les évaluations humaines séparément des profils IA.
 
-## Correctifs 0.9.3.2
+## Ce que fait cette version
 
-- normalisation déterministe des alias explicitement autorisés, dont `atmosphere_theme.*` vers `atmosphere_themes.*` ;
-- validation stricte de l’existence réelle de chaque chemin dans le profil généré ;
-- une seule tentative de réparation Qwen pour les chemins encore invalides, avec sortie limitée à des couples `from`/`to` ;
-- application d’une réparation uniquement si la cible appartient aux chemins autorisés de la même dimension ;
-- consolidation avant validation des preuves compatibles qui aboutissent au même chemin ;
-- union déterministe de leurs `source_ids`, conservation de toutes les notes et confiance fusionnée volontairement prudente ;
-- rejet structuré des collisions mêlant une preuve contradictoire à une preuve favorable, ou une correction humaine à une preuve documentaire ;
-- rejet inchangé du profil lorsqu’une réparation est absente, ambiguë, hors dimension ou hors schéma ;
-- affichage du code, de l’étape et du détail complet de l’erreur dans la fiche du jeu et la vue **Erreurs** ;
-- aucune modification du schéma SQLite 0.9.3 et aucune réécriture des profils existants.
+- Sélection expérimentale configurable (50 jeux par défaut).
+- Réutilisation automatique des profils existants, sans validation humaine obligatoire.
+- Normalisation commune sur 11 dimensions : gameplay, narration, exploration, structure, rythme, progression, difficulté, ambiance, mode, perspective et identité.
+- Niveau **A / B / C** calculé à partir de la complétude et de la présence d’un embedding.
+- Score hybride initial :
+  - 40 % similarité sémantique ;
+  - 20 % gameplay ;
+  - 20 % narration + ambiance ;
+  - 15 % structure + exploration ;
+  - 5 % autres dimensions.
+- Repli automatique sur un score structuré lorsque les embeddings sont absents.
+- Top 5, ressemblances, différences et mode de calcul pour chaque jeu.
+- Évaluations : très similaire, partiellement similaire, peu similaire, non similaire, avec raison facultative.
+- Tableau de bord couverture/qualité, densité utile et dimensions manquantes.
+- Historique des recalculs.
 
-La génération reste multidimensionnelle et la seconde passe contrôle les affirmations contre les sources citées et contre les corrections humaines déjà enregistrées.
+## Garanties sur les données
 
-## Nouveautés 0.9.3
+La migration est additive. Elle ne supprime ni ne remplace aucune table de Backlog. Elle crée uniquement :
 
-- schéma de profil `2.1` avec définitions non ambiguës pour la topologie, la génération de carte, la linéarité, le modèle de session et la persistance ;
-- séparation de `exploration.topology` et `exploration.map_generation` pour ne plus confondre monde ouvert et génération procédurale ;
-- remplacement de `progression.persistence` par `save_persistence` et `reset_model` ;
-- remplacement de `multiplayer.persistence` par `world_persistence` ;
-- preuves attribuées à des chemins précis dans `field_status.<dimension>.claims` ;
-- score distinct de **précision des preuves**, qui pénalise les citations trop larges et les mêmes listes de sources répétées partout ;
-- seconde passe Qwen de vérification factuelle, avec anomalies `warning` ou `critical` ;
-- refus de l’embedding et de la validation tant que la vérification factuelle n’est pas réussie ;
-- réinjection des notes « À corriger » et des corrections de champs dans chaque réanalyse suivante ;
-- interface enrichie avec le rapport de contrôle, les preuves par caractéristique et les scores factuels ;
-- migration SQLite additive : aucune table, version, source, correction, donnée joueur ou embedding historique n’est supprimé.
+- `similarity_experiment_games`
+- `similarity_edges_v094`
+- `recommendation_feedback_v094`
+- `similarity_runs_v094`
 
-## Schéma 2.1 — distinctions importantes
+Le seul champ existant éventuellement mis à jour est `ai_profile_versions.embedding_json` lorsque vous cliquez volontairement sur **Compléter les embeddings**.
 
-```json
-{
-  "schema_version": "2.1",
-  "exploration": {
-    "freedom": "open",
-    "topology": "open_world",
-    "map_generation": "fixed",
-    "guidance": "player_directed",
-    "rewards": ["ressources", "nouveaux sites"],
-    "description": "Le joueur explore une carte conçue et stable pour trouver des ressources."
-  },
-  "progression": {
-    "systems": ["paliers technologiques", "recettes", "logistique"],
-    "scope": "technology",
-    "pacing": "tiered",
-    "save_persistence": "saved_between_sessions",
-    "reset_model": "none",
-    "description": "Les usines et les technologies restent enregistrées entre les sessions."
-  }
-}
-```
-
-`topology` décrit l’organisation spatiale. `map_generation` dit si la carte est fixe ou générée. `save_persistence` indique si les acquis sont sauvegardés entre les sessions. `reset_model` décrit leur éventuelle réinitialisation. `multiplayer.world_persistence` ne décrit que le monde partagé.
-
-## Preuves par caractéristique
-
-Chaque dimension conserve un résumé de provenance compatible avec la 0.9.2, mais ajoute des affirmations précises :
-
-```json
-{
-  "field_status": {
-    "exploration": {
-      "status": "documented",
-      "source_ids": ["SOURCE-1"],
-      "confidence": "high",
-      "note": "La source officielle décrit le monde ouvert.",
-      "claims": [
-        {
-          "path": "exploration.map_generation",
-          "source_ids": ["SOURCE-1"],
-          "support": "direct",
-          "confidence": "high",
-          "note": "La carte est conçue et identique entre les parties."
-        }
-      ]
-    }
-  }
-}
-```
-
-`source_ids` doit être exactement l’union des sources réellement utilisées par les `claims`. Un chemin ne peut apparaître qu’une fois : lorsque plusieurs sources compatibles soutiennent la même valeur, Backlog les regroupe dans ce `claim` unique. Une correction humaine peut utiliser `support: "human"` sans `SOURCE-N`, mais n’est jamais fusionnée avec une preuve documentaire.
-
-## Pipeline de fiabilité
-
-1. construction ou réutilisation du dossier documentaire ;
-2. chargement des notes de révision et corrections antérieures du jeu ;
-3. génération du profil 2.1 ;
-4. normalisation des chemins et consolidation déterministe des preuves compatibles ;
-5. validation stricte du schéma, des chemins et des sources ;
-6. vérification factuelle Qwen indépendante ;
-7. calcul séparé de la sémantique, de la couverture, de la précision des preuves et de l’exactitude factuelle ;
-8. embedding seulement si le dossier et le profil sont suffisants **et** si la vérification retourne `passed`.
-
-Un profil peut donc être structurellement complet tout en restant bloqué pour anomalie factuelle.
-
-## Corrections humaines
-
-- Une note enregistrée avec **À corriger** est transmise aux générations suivantes du même jeu.
-- Les corrections structurées de `ai_profile_field_reviews` avec `review_status=corrected` sont dédupliquées par chemin ; la plus récente est prioritaire.
-- Si une correction et le dossier sont en tension, le générateur doit conserver la tension dans `uncertainties` au lieu de réintroduire silencieusement l’erreur.
-
-## Pré-requis
-
-- Node.js 24 ou l’image Docker fournie ;
-- Ollama accessible depuis le conteneur ;
-- `qwen3:32b` et `embeddinggemma`, sauf adaptation des variables ;
-- SearXNG facultatif pour la recherche documentaire externe.
-
-## Variables principales
-
-| Variable | Défaut | Rôle |
-|---|---:|---|
-| `PORT` | `3000` | Port HTTP interne |
-| `DATA_DIR` | `/data` | Dossier persistant |
-| `DATABASE_PATH` | détection automatique | Fichier SQLite existant |
-| `ADMIN_TOKEN` | vide | Protège les mutations |
-| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | API Ollama |
-| `AI_ANALYSIS_MODEL` | `qwen3:32b` | Génération et vérification |
-| `AI_EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
-| `AI_ANALYSIS_TIMEOUT_MS` | `480000` | Délai de génération |
-| `AI_VERIFICATION_TIMEOUT_MS` | `480000` | Délai de vérification |
-| `AI_PATH_REPAIR_TIMEOUT_MS` | `120000` | Délai de l’unique tentative de réparation de chemins |
-| `AI_EMBEDDING_TIMEOUT_MS` | `120000` | Délai d’embedding |
-| `SEARXNG_BASE_URL` | vide | API SearXNG |
-
-## Vérification locale
+Avant tout déploiement, faites tout de même une sauvegarde :
 
 ```bash
-npm run check
-npm test
-DATA_DIR=/tmp/backlog-v0932 PORT=3000 node server.js
-curl http://127.0.0.1:3000/healthz
+cp ./data/backlog.sqlite ./data/backlog.sqlite.bak-$(date +%Y%m%d-%H%M%S)
 ```
 
-Aucune dépendance npm tierce n’est nécessaire.
+## Déploiement recommandé à côté de Backlog
 
-## Déploiement
+1. Décompressez l’archive dans un dossier `backlog-v0.9.4`.
+2. Copiez `docker-compose.example.yml` en `docker-compose.yml`.
+3. Dans `volumes`, indiquez le même dossier hôte que celui contenant `backlog.sqlite`.
+4. Vérifiez l’URL d’Ollama. L’exemple utilise `http://192.168.1.77:11434`.
+5. Lancez :
 
-1. Lire `MIGRATION.md`.
-2. Sauvegarder le volume SQLite complet.
-3. Publier le contenu de l’archive à la racine du dépôt.
-4. Conserver le workflow GitHub existant et le montage `./data:/data`.
-5. Reconstruire l’image puis redéployer avec Dockge.
-6. Exécuter **Tester Ollama**.
-7. Réanalyser individuellement Euro Truck Simulator 2, Control et Satisfactory ; ne pas lancer les 50 jeux avant validation du pilote.
+```bash
+docker compose up -d --build
+```
+
+6. Ouvrez `http://localhost:3094`.
+
+Le Backlog existant reste disponible sur son port actuel. Le laboratoire utilise le port 3094 afin d’éviter tout conflit.
+
+## Si Backlog utilise un volume Docker nommé
+
+Identifiez le volume :
+
+```bash
+docker inspect backlog-test --format '{{json .Mounts}}'
+```
+
+Puis remplacez la section `volumes` de l’exemple par le même volume :
+
+```yaml
+volumes:
+  backlog-data:/data
+
+volumes:
+  backlog-data:
+    external: true
+```
+
+## Premier test
+
+1. Ouvrez le tableau de bord.
+2. Vérifiez la sélection. Si aucune sélection historique n’existe, le laboratoire choisit jusqu’à 50 jeux ayant déjà un profil, en donnant la priorité aux embeddings existants et aux profils récents.
+3. Cliquez sur **Compléter les embeddings** si nécessaire.
+4. Cliquez sur **Recalculer le réseau**.
+5. Ouvrez cinq jeux bien connus et évaluez leurs voisins.
+6. Utilisez les statistiques pour décider s’il faut élargir la couverture ou corriger une dimension systématiquement faible.
+
+Pour 50 profils exploitables, le réseau contient exactement **1 225 paires uniques**.
+
+## Variables d’environnement
+
+| Variable | Défaut | Utilité |
+|---|---|---|
+| `PORT` | `3094` | Port HTTP du laboratoire |
+| `BACKLOG_DB` | `/data/backlog.sqlite` | Chemin de la base SQLite |
+| `OLLAMA_URL` | `http://host.docker.internal:11434` | URL d’Ollama |
+| `EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
+| `EXPERIMENT_SIZE` | `50` | Nombre initial de jeux |
+| `USE_DRAFT_PROFILES` | `true` | Autoriser les profils candidats |
+| `USEFUL_SIMILARITY_THRESHOLD` | `0.55` | Seuil provisoire pour la densité utile |
+| `OLLAMA_TIMEOUT_MS` | `120000` | Délai maximal par embedding |
+
+## Limites connues
+
+- Le laboratoire réutilise et compare les profils existants ; il ne déclenche pas la collecte documentaire ni la génération d’un nouveau profil, car ces routes ne sont pas présentes dans les pièces jointes. Les jeux sans profil restent explicitement signalés.
+- Les pondérations et le seuil de densité sont des hypothèses expérimentales, pas des valeurs validées.
+- Avant des évaluations humaines suffisantes, la « densité utile » est un proxy fondé sur le score calculé. Le score d’utilité issu des avis devient plus pertinent à mesure que les évaluations s’accumulent.
+- Le choix automatique d’un profil favorise d’abord la complétude commune, puis la présence d’un embedding, puis la version la plus récente. Il ne modifie pas son état de cycle de vie.
+
+## Tests
+
+Avec Node.js 22.5 ou plus récent :
+
+```bash
+npm test
+npm run check
+```
