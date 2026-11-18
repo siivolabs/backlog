@@ -1,57 +1,43 @@
-# Migration vers Backlog 0.9.3.2
+# Migration vers Backlog V0.9.4.1
 
-## Depuis Backlog 0.9.3 ou 0.9.3.1
+## Principe
 
-Le correctif 0.9.3.2 ne modifie aucune table ni colonne. La valeur `schema_version=0.9.3` dans `ai_v09_meta` reste volontairement inchangée : elle décrit le schéma SQLite, commun aux versions 0.9.3, 0.9.3.1 et 0.9.3.2. Le remplacement des fichiers applicatifs ne réécrit ni les profils, ni les dossiers, ni les tâches, ni les embeddings existants.
+V0.9.4.1 est une correction de la première V0.9.4 autonome. Elle restaure l’application complète V0.9.3.2 et intègre le laboratoire de similarité dans la même interface et sur le même port.
 
-## Principe de sécurité
+## Avant la mise à jour
 
-La migration est **additive et idempotente**. Au démarrage, Backlog 0.9.3 :
+```bash
+cp ./data/backlog.sqlite ./data/backlog.sqlite.bak-$(date +%Y%m%d-%H%M%S)
+```
 
-1. détecte le SQLite existant dans `/data` ou via `DATABASE_PATH` ;
-2. conserve toutes les tables et lignes existantes ;
-3. ajoute à `ai_profile_versions` les colonnes `evidence_precision`, `factual_quality`, `factual_accuracy_score`, `verification_json` et `verification_prompt_version` ;
-4. ne convertit ni ne réécrit les `profile_json` 2.0 ou historiques ;
-5. conserve versions actives, candidates, rejetées, sources, corrections, embeddings, similarités et données joueur ;
-6. inscrit `schema_version=0.9.3` dans `ai_v09_meta` ;
-7. ne crée aucune tâche d’analyse automatique.
+Ne supprimez pas le dossier `data` et ne réinitialisez pas SQLite.
 
-Une réanalyse individuelle crée une version `schema_version: "2.1"`. La version active reste en place jusqu’à validation humaine. Les profils 2.0 restent consultables, mais seules les nouvelles candidates bénéficient des preuves précises et de la vérification factuelle.
+## Compatibilité
 
-## Procédure recommandée
+- Depuis V0.9.3.2 : quatre tables de réseau sont ajoutées.
+- Depuis la première V0.9.4 : les quatre tables existantes sont réutilisées.
+- Aucune promotion de profil candidat n’est effectuée.
+- Aucune réanalyse ou génération d’embedding n’est lancée au démarrage.
 
-1. Arrêter Backlog afin de fermer proprement le journal WAL.
-2. Sauvegarder le volume complet :
+## Déploiement Dockge
 
-   ```bash
-   chmod +x scripts/backup-and-verify.sh
-   ./scripts/backup-and-verify.sh /srv/docker/backlog/data
-   ```
+Conservez les ports, réseaux et variables existants. Le service doit inclure :
 
-3. Si le fichier SQLite a un nom non standard, définir `DATABASE_PATH` explicitement.
-4. Conserver le montage `./data:/data` et les adresses Ollama/SearXNG accessibles depuis le conteneur.
-5. Publier les fichiers 0.9.3.2 à la racine du dépôt et reconstruire l’image.
-6. Vérifier `/healthz` : la version doit être `0.9.3.2`.
-7. Exécuter **Tester Ollama** et vérifier l’étape `completed`.
-8. Comparer le nombre de jeux et de versions de profils avec la sauvegarde.
-9. Réanalyser d’abord uniquement Satisfactory pour vérifier la disparition de `chemin de preuve dupliqué (summary)`.
-10. Contrôler le rapport factuel avant toute validation ou extension au lot pilote.
+```yaml
+user: "1000:1000"
+read_only: true
+security_opt:
+  - no-new-privileges:true
+cap_drop:
+  - ALL
+tmpfs:
+  - /tmp:rw,noexec,nosuid,size=64m
+volumes:
+  - ./data:/data
+```
 
-## Contrôles du pilote
-
-- ETS2 et Satisfactory : `map_generation: fixed`, jamais `topology: procedural` ;
-- Control et Satisfactory : `save_persistence: saved_between_sessions` ;
-- Satisfactory : `reset_model: none` et narration non classée linéaire à cause des seuls objectifs ;
-- les preuves détaillées citent des chemins et des sources spécifiques ;
-- les mêmes dix sources ne sont pas répétées sur chaque dimension ;
-- les notes « À corriger » réapparaissent dans la réanalyse suivante ;
-- tout avertissement ou échec factuel bloque l’embedding et le bouton de validation ;
-- l’ancienne version active reste disponible tant que la candidate n’est pas validée.
+Enregistrez puis utilisez **Mettre à jour** afin de recréer le conteneur.
 
 ## Retour arrière
 
-1. Arrêter le conteneur 0.9.3.2.
-2. Restaurer le dossier de sauvegarde complet dans `/data`.
-3. Redéployer l’image précédente.
-
-Un retour d’image seul ne supprime pas les colonnes additives 0.9.3 ; restaurer le volume garantit un état strictement identique.
+La migration étant additive, V0.9.3.2 ignore les tables du réseau. En cas de retour arrière, testez d’abord la copie sauvegardée et conservez les tables V0.9.4 : elles n’entravent pas V0.9.3.2.

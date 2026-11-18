@@ -1,113 +1,99 @@
-# Backlog V0.9.4 — Réseau expérimental de similarité
+# Backlog V0.9.4.1 — correctif d’intégration
 
-Cette livraison ajoute un laboratoire **non destructif** à Backlog V0.9.3.2. Elle utilise la même base SQLite, accepte les profils `active` et `draft`, construit un profil commun, calcule toutes les paires du périmètre et enregistre les évaluations humaines séparément des profils IA.
+Cette livraison corrige la régression de la première V0.9.4. Elle repart intégralement de **Backlog V0.9.3.2** et ajoute le réseau expérimental comme une section de la même application.
 
-## Ce que fait cette version
+## Ce qui est préservé
 
-- Sélection expérimentale configurable (50 jeux par défaut).
-- Réutilisation automatique des profils existants, sans validation humaine obligatoire.
-- Normalisation commune sur 11 dimensions : gameplay, narration, exploration, structure, rythme, progression, difficulté, ambiance, mode, perspective et identité.
-- Niveau **A / B / C** calculé à partir de la complétude et de la présence d’un embedding.
-- Score hybride initial :
-  - 40 % similarité sémantique ;
-  - 20 % gameplay ;
-  - 20 % narration + ambiance ;
-  - 15 % structure + exploration ;
-  - 5 % autres dimensions.
-- Repli automatique sur un score structuré lorsque les embeddings sont absents.
-- Top 5, ressemblances, différences et mode de calcul pour chaque jeu.
-- Évaluations : très similaire, partiellement similaire, peu similaire, non similaire, avec raison facultative.
-- Tableau de bord couverture/qualité, densité utile et dimensions manquantes.
-- Historique des recalculs.
+- tableau de bord IA ;
+- bibliothèque complète et pagination ;
+- fiches détaillées ;
+- profils, sources, historique et révision ;
+- réanalyse complète ou par étape ;
+- administration IA et jeton `ADMIN_TOKEN` ;
+- Ollama, SearXNG et file de tâches ;
+- données SQLite existantes.
 
-## Garanties sur les données
+## Ce qui est ajouté
 
-La migration est additive. Elle ne supprime ni ne remplace aucune table de Backlog. Elle crée uniquement :
+Un sixième onglet **Réseau de similarité** permet de :
+
+- sélectionner le périmètre expérimental (50 jeux par défaut) ;
+- utiliser le meilleur profil `active` ou `draft` sans le promouvoir ;
+- compléter volontairement les embeddings manquants ;
+- calculer toutes les paires du périmètre ;
+- consulter le Top 5, les ressemblances et les différences ;
+- enregistrer une évaluation séparée des goûts personnels ;
+- suivre la couverture horizontale et la qualité verticale.
+
+Les fiches détaillées conservent leur onglet **Similarités** et y affichent également les voisins du réseau expérimental lorsqu’ils existent.
+
+## Migration SQLite
+
+La migration est additive. Elle crée ou réutilise uniquement :
 
 - `similarity_experiment_games`
 - `similarity_edges_v094`
 - `recommendation_feedback_v094`
 - `similarity_runs_v094`
 
-Le seul champ existant éventuellement mis à jour est `ai_profile_versions.embedding_json` lorsque vous cliquez volontairement sur **Compléter les embeddings**.
+Elle ne supprime aucune table et ne modifie aucun état `active`, `draft`, `superseded` ou `rejected`. Le champ `embedding_json` n’est mis à jour que lorsqu’un administrateur lance explicitement **Compléter les embeddings**.
 
-Avant tout déploiement, faites tout de même une sauvegarde :
+Les tables déjà créées par la première V0.9.4 sont réutilisées de façon idempotente.
 
-```bash
-cp ./data/backlog.sqlite ./data/backlog.sqlite.bak-$(date +%Y%m%d-%H%M%S)
-```
+## Déploiement
 
-## Déploiement recommandé à côté de Backlog
+1. Sauvegarder la base :
 
-1. Décompressez l’archive dans un dossier `backlog-v0.9.4`.
-2. Copiez `docker-compose.example.yml` en `docker-compose.yml`.
-3. Dans `volumes`, indiquez le même dossier hôte que celui contenant `backlog.sqlite`.
-4. Vérifiez l’URL d’Ollama. L’exemple utilise `http://192.168.1.77:11434`.
-5. Lancez :
+   ```bash
+   cp ./data/backlog.sqlite ./data/backlog.sqlite.bak-$(date +%Y%m%d-%H%M%S)
+   ```
 
-```bash
-docker compose up -d --build
-```
+2. Remplacer les sources de l’image par cette archive puis reconstruire l’image `dev`.
+3. Conserver le même montage : `./data:/data`.
+4. Conserver le jeton `ADMIN_TOKEN` et les URL Ollama/SearXNG.
+5. Recréer le conteneur, pas seulement le redémarrer.
 
-6. Ouvrez `http://localhost:3094`.
+Le `compose.yaml` fourni exécute le conteneur avec `user: "1000:1000"`, `read_only: true`, `cap_drop: ALL` et un `/tmp` en `tmpfs`.
 
-Le Backlog existant reste disponible sur son port actuel. Le laboratoire utilise le port 3094 afin d’éviter tout conflit.
-
-## Si Backlog utilise un volume Docker nommé
-
-Identifiez le volume :
+Vérification après déploiement :
 
 ```bash
-docker inspect backlog-test --format '{{json .Mounts}}'
+docker inspect backlog-test --format 'User={{.Config.User}} CapDrop={{json .HostConfig.CapDrop}} ReadOnly={{.HostConfig.ReadonlyRootfs}}'
+docker logs --tail 30 backlog-test
 ```
 
-Puis remplacez la section `volumes` de l’exemple par le même volume :
+Résultat attendu :
 
-```yaml
-volumes:
-  backlog-data:/data
-
-volumes:
-  backlog-data:
-    external: true
+```text
+User=1000:1000 CapDrop=["ALL"] ReadOnly=true
 ```
 
-## Premier test
+## Premier parcours
 
-1. Ouvrez le tableau de bord.
-2. Vérifiez la sélection. Si aucune sélection historique n’existe, le laboratoire choisit jusqu’à 50 jeux ayant déjà un profil, en donnant la priorité aux embeddings existants et aux profils récents.
-3. Cliquez sur **Compléter les embeddings** si nécessaire.
-4. Cliquez sur **Recalculer le réseau**.
-5. Ouvrez cinq jeux bien connus et évaluez leurs voisins.
-6. Utilisez les statistiques pour décider s’il faut élargir la couverture ou corriger une dimension systématiquement faible.
+1. Vérifier la bibliothèque et ouvrir quelques fiches.
+2. Ouvrir **Administration IA**, saisir le jeton et tester Ollama.
+3. Ouvrir **Réseau de similarité**.
+4. Vérifier ou modifier la sélection de 50 jeux.
+5. Lancer **Compléter les embeddings** si nécessaire.
+6. Lancer **Recalculer le réseau**.
+7. Évaluer les cinq voisins de quelques jeux connus.
 
-Pour 50 profils exploitables, le réseau contient exactement **1 225 paires uniques**.
+## Variables du réseau
 
-## Variables d’environnement
+| Variable | Défaut | Rôle |
+|---|---:|---|
+| `EXPERIMENT_SIZE` | `50` | taille de la sélection initiale |
+| `USE_DRAFT_PROFILES` | `true` | autoriser les candidats dans le laboratoire |
+| `USEFUL_SIMILARITY_THRESHOLD` | `0.55` | seuil provisoire de densité utile |
+| `AI_EMBEDDING_TIMEOUT_MS` | `120000` | délai maximal par requête d’embedding |
 
-| Variable | Défaut | Utilité |
-|---|---|---|
-| `PORT` | `3094` | Port HTTP du laboratoire |
-| `BACKLOG_DB` | `/data/backlog.sqlite` | Chemin de la base SQLite |
-| `OLLAMA_URL` | `http://host.docker.internal:11434` | URL d’Ollama |
-| `EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
-| `EXPERIMENT_SIZE` | `50` | Nombre initial de jeux |
-| `USE_DRAFT_PROFILES` | `true` | Autoriser les profils candidats |
-| `USEFUL_SIMILARITY_THRESHOLD` | `0.55` | Seuil provisoire pour la densité utile |
-| `OLLAMA_TIMEOUT_MS` | `120000` | Délai maximal par embedding |
-
-## Limites connues
-
-- Le laboratoire réutilise et compare les profils existants ; il ne déclenche pas la collecte documentaire ni la génération d’un nouveau profil, car ces routes ne sont pas présentes dans les pièces jointes. Les jeux sans profil restent explicitement signalés.
-- Les pondérations et le seuil de densité sont des hypothèses expérimentales, pas des valeurs validées.
-- Avant des évaluations humaines suffisantes, la « densité utile » est un proxy fondé sur le score calculé. Le score d’utilité issu des avis devient plus pertinent à mesure que les évaluations s’accumulent.
-- Le choix automatique d’un profil favorise d’abord la complétude commune, puis la présence d’un embedding, puis la version la plus récente. Il ne modifie pas son état de cycle de vie.
+Toutes les mutations du réseau utilisent le même contrôle `ADMIN_TOKEN` que le reste de Backlog.
 
 ## Tests
-
-Avec Node.js 22.5 ou plus récent :
 
 ```bash
 npm test
 npm run check
 ```
+
+La livraison comprend les 41 tests de V0.9.3.2 et 3 tests supplémentaires couvrant l’intégration, la non-promotion des candidats et l’idempotence de la migration V0.9.4.

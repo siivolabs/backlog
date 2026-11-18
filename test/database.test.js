@@ -6,58 +6,208 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const { BacklogDatabase } = require('../lib/database');
+const { BacklogDatabase, resolveDatabasePath } = require('../lib/database');
 
 function fixture() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-v094-'));
-  const filename = path.join(directory, 'backlog.sqlite');
-  const db = new DatabaseSync(filename);
-  db.exec(`
-    CREATE TABLE games(app_id TEXT PRIMARY KEY, name TEXT NOT NULL);
-    CREATE TABLE ai_profile_versions(
-      id INTEGER PRIMARY KEY, app_id TEXT NOT NULL, version_no INTEGER,
-      lifecycle_state TEXT, profile_json TEXT, embedding_json TEXT,
-      embedding_model TEXT, profile_completeness_score REAL,
-      semantic_quality_score REAL, generated_at TEXT, quality_status TEXT
-    );
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'backlog-v09-'));
+  const filename=path.join(dir,'backlog.sqlite');
+  const legacy=new DatabaseSync(filename);
+  legacy.exec(`
+    CREATE TABLE games(appid TEXT PRIMARY KEY,name TEXT NOT NULL,playtime_forever INTEGER,genres TEXT,platforms TEXT);
+    INSERT INTO games VALUES('400','Portal',720,'Puzzle, Action','["windows","linux"]');
+    INSERT INTO games VALUES('620','Portal 2',1200,'Puzzle, Action','["windows"]');
+    CREATE TABLE ai_profiles(app_id TEXT PRIMARY KEY,profile_json TEXT,embedding_json TEXT,model TEXT,generated_at TEXT);
+    CREATE TABLE ai_sources(app_id TEXT,source_type TEXT,title TEXT,url TEXT,excerpt TEXT,collected_at TEXT);
+    INSERT INTO ai_sources VALUES('400','steam','Page Steam','https://store.steampowered.com/app/400','Description officielle','2026-11-16T09:00:00.000Z');
   `);
-  const game = db.prepare('INSERT INTO games(app_id,name) VALUES(?,?)');
-  const profile = db.prepare("INSERT INTO ai_profile_versions(id,app_id,version_no,lifecycle_state,profile_json,embedding_json,profile_completeness_score,generated_at) VALUES(?,?,?,?,?,?,?,?)");
-  for (let i = 1; i <= 5; i += 1) {
-    game.run(String(i), `Jeu ${i}`);
-    profile.run(i, String(i), 1, i === 1 ? 'draft' : 'active', JSON.stringify({ gameplay_loops:[`automation ${i % 2}`], game_structure:'missions', atmosphere_themes:['industrial'] }), JSON.stringify([1, i / 10, 0.5]), 0.8, `2026-01-0${i}T00:00:00Z`);
-  }
-  db.close();
-  return { directory, filename };
+  const profile={summary:'Une aventure de réflexion spatiale fondée sur des portails et une narration environnementale.',gameplay_loops:['Résoudre des salles','Manipuler des portails'],narrative:'Humour et mystère',exploration:'Salles linéaires',structure:'Chapitres',atmosphere_themes:['science','isolement'],pace:'Mesuré',progression:'Complexité croissante',difficulty_friction:'Énigmes lisibles',multiplayer:'Solo',distinctive_elements:['portal gun'],uncertainties:[]};
+  legacy.prepare('INSERT INTO ai_profiles VALUES(?,?,?,?,?)').run('400',JSON.stringify(profile),JSON.stringify([1,0,0]),'qwen3:32b','2026-11-16T10:00:00.000Z');
+  legacy.close();
+  const database=new BacklogDatabase(filename,{logger:{info(){}}});
+  return {dir,filename,database,profile};
 }
 
-test('migration additive, sélection, réseau et feedback', () => {
-  const { directory, filename } = fixture();
-  const database = new BacklogDatabase(filename, { experimentSize: 5, useDraftProfiles: true });
+test('détecte la base existante et importe les profils V0.8 sans suppression',()=>{
+  const {database,dir}=fixture();
   try {
-    assert.equal(database.getSelectedAppIds().length, 5);
-    const result = database.rebuildNetwork();
-    assert.equal(result.pairCount, 10);
-    const recommendations = database.recommendations('1', 5);
-    assert.equal(recommendations.length, 4);
-    database.saveFeedback({ sourceAppId:'1', targetAppId:recommendations[0].appId, rating:'very_similar', reason:'Même boucle principale' });
-    const dashboard = database.dashboard();
-    assert.equal(dashboard.coverage.pairCount, 10);
-    assert.equal(dashboard.quality.evaluatedRecommendations, 1);
-    assert.equal(dashboard.games.find((game)=>game.appId==='1').recommendations[0].feedback.rating, 'very_similar');
-  } finally { database.close(); fs.rmSync(directory, { recursive:true, force:true }); }
+    assert.equal(database.discoverLibrarySource().table,'games');
+    assert.equal(database.getGame('400').name,'Portal');
+    assert.equal(database.getActiveProfile('400').version_no,1);
+    assert.equal(database.getMeta('legacy_import_count'),'1');
+    assert.equal(database.getMeta('legacy_source_import_count'),'1');
+    assert.equal(database.getProfileBundle('400').displayed.sources[0].source_type,'steam');
+    assert.equal(database.db.prepare("SELECT COUNT(*) AS count FROM games").get().count,2);
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
 });
 
-test('le choix de profil accepte un candidat plus complet sans le promouvoir', () => {
-  const { directory, filename } = fixture();
-  const db = new DatabaseSync(filename);
-  db.prepare("INSERT INTO ai_profile_versions(id,app_id,version_no,lifecycle_state,profile_json,embedding_json,profile_completeness_score,generated_at) VALUES(99,'1',2,'draft',?,NULL,0.99,'2026-02-01T00:00:00Z')").run(JSON.stringify({ gameplay_loops:['automation'],narrative_structure:['environmental'],world_exploration:['open'],game_structure:['missions'],pacing:['slow'],progression_systems:['technology'],difficulty:['planning'],atmosphere_themes:['industrial'],game_modes:['solo'],perspective:['first person'],distinctive_elements:['factory'] }));
-  db.close();
-  const database = new BacklogDatabase(filename, { experimentSize: 5, useDraftProfiles: true });
+test('la réanalyse crée une candidate et préserve la version active jusqu’à validation',()=>{
+  const {database,dir,profile}=fixture();
   try {
-    const chosen = database.chooseProfiles(['1'])[0];
-    assert.equal(chosen.versionNo, 2);
-    const verify = new DatabaseSync(filename, { readOnly:true }).prepare('SELECT lifecycle_state FROM ai_profile_versions WHERE id=99').get();
-    assert.equal(verify.lifecycle_state, 'draft');
-  } finally { database.close(); fs.rmSync(directory, { recursive:true, force:true }); }
+    const active=database.getActiveProfile('400');
+    const candidate=database.insertProfileVersion({appId:'400',profile:{...profile,summary:'Version améliorée avec davantage de sources.'},embedding:[.9,.1,0],model:'qwen3:32b',promptVersion:'v09',basedOnVersionId:active.id,lifecycleState:'draft'});
+    assert.equal(database.getActiveProfile('400').id,active.id);
+    assert.equal(database.getProfileBundle('400').candidate.id,candidate.id);
+    database.reviewProfile(candidate.id,{action:'validate',notes:'Vérifié manuellement'});
+    assert.equal(database.getActiveProfile('400').id,candidate.id);
+    assert.equal(database.db.prepare('SELECT lifecycle_state FROM ai_profile_versions WHERE id=?').get(active.id).lifecycle_state,'superseded');
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('retours de similarité et expérience personnelle restent dans des tables séparées',()=>{
+  const {database,dir}=fixture();
+  try {
+    database.saveSimilarityFeedback({fromAppId:'400',toAppId:'620',similarityScore:3,personallyRelevant:false,reason:'Très similaire mais déjà joué'});
+    database.saveExperience('620',{liked:1,overallRating:5,dimensions:{narrative:4},comment:'Excellent coop'});
+    assert.equal(database.db.prepare('SELECT similarity_score FROM ai_similarity_feedback').get().similarity_score,3);
+    assert.equal(database.getExperience('620').overall_rating,5);
+    assert.equal(database.getDashboard().feedback,2);
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('resolveDatabasePath privilégie un fichier SQLite existant',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'backlog-path-'));
+  try { fs.writeFileSync(path.join(dir,'backlog.db'),''); assert.equal(resolveDatabasePath({DATA_DIR:dir}),path.join(dir,'backlog.db')); }
+  finally { fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+
+test('versionne les dossiers documentaires séparément des profils',()=>{
+  const {database,dir}=fixture();
+  try {
+    const base={quality_status:'partial',completeness_score:64,dimensions:{gameplay_loops:true},notes:['Ambiance manquante'],source_fingerprint:'abc',sources:[{sourceType:'steam',sourceKey:'steam:400',title:'Steam',excerpt:'Description détaillée',supports:['summary'],confidence:'high',relevanceScore:10,retrievalStatus:'structured'}]};
+    const first=database.insertDossier('400',base);
+    const second=database.insertDossier('400',{...base,quality_status:'complete',completeness_score:88,source_fingerprint:'def'});
+    assert.equal(first.version_no,1);
+    assert.equal(second.version_no,2);
+    assert.equal(database.getLatestDossier('400').quality_status,'complete');
+    assert.equal(database.getLatestDossier('400').sources[0].confidence,'high');
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('marque un profil insuffisant sans embedding comme tel dans la bibliothèque',()=>{
+  const {database,dir,profile}=fixture();
+  try {
+    database.db.prepare(`UPDATE ai_profile_versions SET lifecycle_state='superseded' WHERE app_id='400'`).run();
+    database.insertProfileVersion({appId:'400',profile,embedding:null,lifecycleState:'active',qualityStatus:'needs_review',documentQuality:'insufficient',completenessScore:37});
+    const game=database.attachAiState(database.getGame('400'));
+    assert.equal(game.aiStatus,'insufficient');
+    assert.equal(game.documentCompleteness,37);
+    assert.throws(()=>database.reviewProfile(database.getActiveProfile('400').id,{action:'validate'}),/insuffisamment documenté/);
+    const job=database.createJob('400','documents');
+    assert.equal(job.operation,'documents');
+  } finally { database.close(); fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+
+test('migration 0.9.0 vers 0.9.1 reste additive et conserve la version active',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'backlog-v090-migration-'));
+  const filename=path.join(dir,'backlog.sqlite');
+  const old=new DatabaseSync(filename);
+  old.exec(`
+    CREATE TABLE games(appid TEXT PRIMARY KEY,name TEXT NOT NULL);
+    INSERT INTO games VALUES('227300','Euro Truck Simulator 2');
+    CREATE TABLE ai_v09_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL);
+    INSERT INTO ai_v09_meta VALUES('legacy_import_v1','done','2026-11-17T00:00:00.000Z');
+    CREATE TABLE ai_profile_versions(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,app_id TEXT NOT NULL,version_no INTEGER NOT NULL,
+      lifecycle_state TEXT NOT NULL DEFAULT 'active',quality_status TEXT NOT NULL DEFAULT 'generated',
+      profile_json TEXT NOT NULL,embedding_json TEXT,model TEXT,embedding_model TEXT,prompt_version TEXT,
+      source_fingerprint TEXT,generated_at TEXT NOT NULL,based_on_version_id INTEGER,validated_at TEXT,
+      validation_notes TEXT,UNIQUE(app_id,version_no)
+    );
+    INSERT INTO ai_profile_versions(app_id,version_no,lifecycle_state,quality_status,profile_json,generated_at)
+      VALUES('227300',1,'active','generated','{"summary":"profil existant"}','2026-11-17T00:00:00.000Z');
+  `);
+  old.close();
+  const database=new BacklogDatabase(filename,{logger:{info(){}}});
+  try {
+    assert.equal(database.getActiveProfile('227300').version_no,1);
+    assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_profile_versions').get().count,1);
+    assert.ok(database.columns('ai_profile_versions').includes('document_quality'));
+    assert.ok(database.tableNames().includes('ai_document_dossiers'));
+    assert.equal(database.getMeta('schema_version'),'0.9.3');
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('migration 0.9.1 conserve une ancienne table ai_document_sources incompatible',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'backlog-v091-document-sources-'));
+  const filename=path.join(dir,'backlog.sqlite');
+  const old=new DatabaseSync(filename);
+  old.exec(`
+    CREATE TABLE ai_document_sources(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      appid TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      title TEXT,
+      url TEXT,
+      content TEXT,
+      fetched_at TEXT,
+      content_hash TEXT,
+      used_for_profile INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO ai_document_sources(appid,source_type,title,url,content,fetched_at,content_hash,used_for_profile)
+      VALUES('227300','steam','Euro Truck Simulator 2','https://example.test/ets2','source historique','2026-11-16T00:00:00.000Z','abc',1);
+  `);
+  old.close();
+
+  const logger={messages:[],info(message){this.messages.push(message);}};
+  let database=new BacklogDatabase(filename,{logger});
+  try {
+    assert.ok(database.columns('ai_document_sources').includes('dossier_id'));
+    assert.equal(database.getMeta('legacy_document_sources_table'),'ai_document_sources_legacy_v090');
+    assert.equal(database.getMeta('legacy_document_sources_count'),'1');
+    assert.equal(database.db.prepare('SELECT content FROM ai_document_sources_legacy_v090').get().content,'source historique');
+    assert.match(logger.messages.join('\n'),/conservée.*1 ligne/i);
+  } finally { database.close(); }
+
+  database=new BacklogDatabase(filename,{logger:{info(){}}});
+  try {
+    assert.equal(database.getMeta('legacy_document_sources_table'),'ai_document_sources_legacy_v090');
+    assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_document_sources_legacy_v090').get().count,1);
+    assert.equal(database.tableNames().filter((name)=>name.startsWith('ai_document_sources_legacy_v090')).length,1);
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+
+test('migration 0.9.3 ajoute la qualité factuelle sans réécrire les profils existants',()=>{
+  const {database,dir,profile}=fixture();
+  try {
+    const legacy=database.getActiveProfile('400');
+    assert.deepEqual(JSON.parse(legacy.profile_json),profile);
+    assert.equal(legacy.profile_schema_version,'legacy');
+    assert.equal(legacy.profile_quality,null);
+    const candidate=database.insertProfileVersion({
+      appId:'400',profile:{schema_version:'2.0',summary:'Profil structuré conservé séparément.'},
+      profileSchemaVersion:'2.0',profileQuality:'partial',profileCompletenessScore:68,
+      semanticQualityScore:64,evidenceCoverage:90,documentQuality:'complete',completenessScore:92
+    });
+    assert.equal(candidate.profile_schema_version,'2.0');
+    assert.equal(candidate.profile_quality,'partial');
+    assert.equal(candidate.profile_completeness_score,68);
+    assert.equal(candidate.semantic_quality_score,64);
+    assert.equal(candidate.evidence_coverage,90);
+    assert.equal(database.getActiveProfile('400').id,legacy.id);
+    assert.equal(database.getMeta('schema_version'),'0.9.3');
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('refuse de valider un profil sémantiquement insuffisant',()=>{
+  const {database,dir}=fixture();
+  try {
+    const candidate=database.insertProfileVersion({appId:'400',profile:{schema_version:'2.0'},documentQuality:'complete',completenessScore:95,profileQuality:'insufficient',profileCompletenessScore:25,lifecycleState:'draft'});
+    assert.throws(()=>database.reviewProfile(candidate.id,{action:'validate'}),/sémantiquement insuffisant/i);
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('réinjecte les corrections humaines et bloque un profil factuellement non vérifié',()=>{
+  const {database,dir}=fixture();
+  try {
+    const candidate=database.insertProfileVersion({appId:'400',profile:{schema_version:'2.1'},documentQuality:'complete',profileQuality:'complete',factualQuality:'warnings',verification:{status:'warnings',checked_claims:1,issues:[{field_path:'exploration.map_generation',severity:'warning',category:'overconfident',source_ids:['SOURCE-1'],explanation:'La source ne suffit pas à conclure.'}]}});
+    database.saveFieldReview(candidate.id,'exploration.map_generation',{status:'corrected',correctedValue:'fixed',note:'La carte est fixe.'});
+    database.reviewProfile(candidate.id,{action:'needs_review',notes:'Conserver la carte fixe lors de la prochaine analyse.'});
+    const guidance=database.getProfileGuidance('400');
+    assert.equal(guidance.fieldCorrections[0].correctedValue,'fixed');
+    assert.match(guidance.profileNotes[0],/carte fixe/i);
+    assert.throws(()=>database.reviewProfile(candidate.id,{action:'validate'}),/vérification factuelle/i);
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
 });

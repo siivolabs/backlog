@@ -3,87 +3,110 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Backlog V0.9.4 — Réseau de similarité</title>
+  <title>Backlog · Connaissances IA</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
 </head>
 <body>
-  <header class="hero">
-    <div>
-      <p class="eyebrow">BACKLOG · LABORATOIRE</p>
-      <h1>Réseau de similarité <span>V0.9.4</span></h1>
-      <p class="subtitle">Mesurer la couverture, la qualité et l’utilité réelle des recommandations.</p>
-    </div>
-    <div class="actions">
-      <button id="embedBtn" class="button secondary">Compléter les embeddings</button>
-      <button id="rebuildBtn" class="button primary">Recalculer le réseau</button>
-    </div>
+  <header class="topbar">
+    <div><span class="eyebrow">BACKLOG 0.9.4.1</span><h1>Connaissances IA</h1><p>Comprendre les jeux à partir de dossiers documentaires vérifiables.</p></div>
+    <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
   </header>
-
+  <nav class="tabs" aria-label="Navigation principale">
+    <button class="tab active" data-view="dashboard">Tableau de bord</button>
+    <button class="tab" data-view="library">Bibliothèque</button>
+    <button class="tab" data-view="knowledge">Connaissances IA</button>
+    <button class="tab" data-view="network">Réseau de similarité</button>
+    <button class="tab" data-view="errors">Erreurs</button>
+    <button class="tab" data-view="admin">Administration IA</button>
+  </nav>
   <main>
-    <section id="notice" class="notice hidden" role="status"></section>
-
-    <section class="axis-grid">
-      <article class="axis-card coverage-card">
-        <div class="axis-title"><span class="axis-arrow">→</span><div><p>AXE HORIZONTAL</p><h2>Couverture</h2></div></div>
-        <div class="metrics">
-          <div><strong id="selectedMetric">—</strong><span>jeux sélectionnés</span></div>
-          <div><strong id="profiledMetric">—</strong><span>avec profil</span></div>
-          <div><strong id="embeddedMetric">—</strong><span>avec embedding</span></div>
-          <div><strong id="pairsMetric">—</strong><span>paires calculées</span></div>
-        </div>
-        <div class="progress"><i id="coverageBar"></i></div>
-        <p id="coverageCaption" class="caption">Chargement…</p>
-      </article>
-
-      <article class="axis-card quality-card">
-        <div class="axis-title"><span class="axis-arrow">↑</span><div><p>AXE VERTICAL</p><h2>Qualité</h2></div></div>
-        <div class="metrics">
-          <div><strong id="medianMetric">—</strong><span>complétude médiane</span></div>
-          <div><strong id="usableMetric">—</strong><span>profils exploitables</span></div>
-          <div><strong id="densityMetric">—</strong><span>densité utile</span></div>
-          <div><strong id="evaluatedMetric">—</strong><span>avis enregistrés</span></div>
-        </div>
-        <div class="levels"><span class="level a">A <b id="levelA">0</b></span><span class="level b">B <b id="levelB">0</b></span><span class="level c">C <b id="levelC">0</b></span></div>
-        <p class="caption">A = enrichi · B = exploitable · C = insuffisant</p>
-      </article>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div><p class="eyebrow">EXPÉRIENCE ACTIVE</p><h2>Les jeux du réseau</h2><p id="runCaption" class="caption">Aucun calcul récent.</p></div>
-        <div class="panel-tools"><input id="gameFilter" type="search" placeholder="Filtrer les jeux…"><button id="selectionBtn" class="button ghost">Modifier la sélection</button></div>
+    <section id="dashboardView" class="view active">
+      <div class="section-head"><div><span class="eyebrow">COUVERTURE & QUALITÉ</span><h2>Tableau de bord IA</h2></div><button id="refreshDashboard" class="button secondary">Actualiser</button></div>
+      <div id="metricGrid" class="metric-grid" aria-live="polite"></div>
+      <div class="panel split-panel">
+        <div><span class="eyebrow">PROCHAINE ÉTAPE</span><h3>Réviser avant d’étendre</h3><p>Les profils générés restent distincts des connaissances validées. Commencez par les jeux que vous connaissez bien.</p></div>
+        <div class="button-row"><button class="button" data-go="knowledge">Réviser les profils</button><button class="button secondary" data-go="errors">Examiner les erreurs</button></div>
       </div>
-      <div id="games" class="game-list"><div class="skeleton">Chargement des profils…</div></div>
     </section>
 
-    <section class="panel diagnostics">
-      <div class="panel-head"><div><p class="eyebrow">DIAGNOSTIC</p><h2>Dimensions les plus souvent absentes</h2></div></div>
-      <div id="missingDimensions" class="dimension-bars"></div>
+    <section id="libraryView" class="view">
+      <div class="section-head"><div><span class="eyebrow">BIBLIOTHÈQUE ENRICHIE</span><h2>Jeux et profils IA</h2></div></div>
+      <form class="filterbar" id="libraryFilters">
+        <label>Rechercher<input id="gameSearch" type="search" placeholder="Titre du jeu…"></label>
+        <label>Profil IA<select id="aiStatusFilter"><option value="all">Tous</option><option value="ready">Profil prêt / à vérifier</option><option value="partial">Profil partiel</option><option value="insufficient">Profil insuffisant</option><option value="validated">Validé</option><option value="not_analyzed">Non analysé</option><option value="analyzing">Analyse en cours</option><option value="error">Erreur</option><option value="reanalysis_requested">Réanalyse demandée</option></select></label>
+      </form>
+      <p id="librarySummary" class="muted"></p><div id="gameGrid" class="game-grid"></div>
+      <div class="button-row pagination"><button id="previousPage" class="button secondary">Page précédente</button><button id="nextPage" class="button secondary">Page suivante</button></div>
+    </section>
+
+    <section id="knowledgeView" class="view">
+      <div class="section-head"><div><span class="eyebrow">FILE DE RÉVISION</span><h2>Base de connaissances</h2><p>Consultez la provenance et validez explicitement les analyses.</p></div></div>
+      <div id="knowledgeTable" class="table-wrap"></div>
+    </section>
+
+
+    <section id="networkView" class="view">
+      <div class="section-head">
+        <div><span class="eyebrow">LABORATOIRE INTÉGRÉ</span><h2>Réseau expérimental de similarité</h2><p>Mesurer la couverture, la qualité et l’utilité des recommandations sans remplacer les profils ni leur cycle de validation.</p></div>
+        <div class="button-row"><button id="networkEmbedBtn" class="button secondary">Compléter les embeddings</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
+      </div>
+      <div id="networkJob" class="panel network-job" hidden></div>
+      <div class="network-axis-grid">
+        <article class="network-axis-card">
+          <div class="network-axis-title"><span>→</span><div><small>AXE HORIZONTAL</small><h3>Couverture</h3></div></div>
+          <div class="network-metrics"><div><strong id="networkSelectedMetric">—</strong><small>sélectionnés</small></div><div><strong id="networkProfiledMetric">—</strong><small>avec profil</small></div><div><strong id="networkEmbeddedMetric">—</strong><small>avec embedding</small></div><div><strong id="networkPairsMetric">—</strong><small>paires calculées</small></div></div>
+          <div class="network-progress"><i id="networkCoverageBar"></i></div><p id="networkCoverageCaption" class="muted">Chargement…</p>
+        </article>
+        <article class="network-axis-card">
+          <div class="network-axis-title"><span>↑</span><div><small>AXE VERTICAL</small><h3>Qualité</h3></div></div>
+          <div class="network-metrics"><div><strong id="networkMedianMetric">—</strong><small>complétude médiane</small></div><div><strong id="networkUsableMetric">—</strong><small>exploitables</small></div><div><strong id="networkDensityMetric">—</strong><small>densité utile</small></div><div><strong id="networkEvaluatedMetric">—</strong><small>avis enregistrés</small></div></div>
+          <div class="network-levels"><span class="a">A <b id="networkLevelA">0</b></span><span class="b">B <b id="networkLevelB">0</b></span><span class="c">C <b id="networkLevelC">0</b></span></div>
+        </article>
+      </div>
+      <div class="panel">
+        <div class="section-head"><div><span class="eyebrow">EXPÉRIENCE ACTIVE</span><h3>Les jeux du réseau</h3><p id="networkRunCaption" class="muted">Aucun calcul récent.</p></div><div class="network-tools"><input id="networkGameFilter" type="search" placeholder="Filtrer les jeux…"><button id="networkSelectionBtn" class="button secondary">Modifier la sélection</button></div></div>
+        <div id="networkGames" class="network-game-list"><div class="empty">Chargement des profils…</div></div>
+      </div>
+      <div class="panel"><span class="eyebrow">DIAGNOSTIC</span><h3>Dimensions les plus souvent absentes</h3><div id="networkMissingDimensions" class="network-dimensions"></div></div>
+    </section>
+
+    <section id="errorsView" class="view">
+      <div class="section-head"><div><span class="eyebrow">DIAGNOSTIC</span><h2>Analyses en erreur</h2></div><button id="refreshErrors" class="button secondary">Actualiser</button></div>
+      <div id="errorList" class="error-list"></div>
+    </section>
+
+    <section id="adminView" class="view">
+      <div class="section-head"><div><span class="eyebrow">OUTILS SECONDAIRES</span><h2>Administration IA</h2><p>Le lancement des analyses n’occupe plus l’espace principal.</p></div></div>
+      <div class="panel form-grid">
+        <label>Jeton administrateur<input id="adminToken" type="password" autocomplete="off" placeholder="Non requis si ADMIN_TOKEN est vide"></label>
+        <div><span class="label">Configuration</span><p id="engineDetails" class="muted">Chargement…</p></div>
+        <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
+        <pre id="testResult" class="result" hidden></pre>
+      </div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.4.1 conserve les preuves par caractéristique, la vérification factuelle et la réutilisation des corrections humaines sans réécrire les profils existants. Aucune table n’est supprimée et aucune réanalyse en masse n’est lancée.</p></div>
     </section>
   </main>
 
-  <dialog id="selectionDialog">
-    <form method="dialog" class="dialog-card">
-      <div class="dialog-head"><div><p class="eyebrow">PÉRIMÈTRE</p><h2>Sélectionner les jeux</h2></div><button value="cancel" class="icon-button" aria-label="Fermer">×</button></div>
-      <input id="libraryFilter" type="search" placeholder="Rechercher dans la bibliothèque…">
-      <p class="caption"><span id="selectionCount">0</span> jeux sélectionnés. La cible expérimentale est de 50.</p>
-      <div id="libraryGames" class="library-list"></div>
-      <div class="dialog-actions"><button value="cancel" class="button ghost">Annuler</button><button id="saveSelectionBtn" value="default" class="button primary">Enregistrer la sélection</button></div>
+
+  <dialog id="networkSelectionDialog">
+    <form method="dialog" class="network-selection-shell">
+      <button class="close" value="cancel" aria-label="Fermer">×</button>
+      <span class="eyebrow">PÉRIMÈTRE EXPÉRIMENTAL</span><h2>Sélectionner les jeux</h2>
+      <input id="networkLibraryFilter" type="search" placeholder="Rechercher dans la bibliothèque…">
+      <p class="muted"><span id="networkSelectionCount">0</span> jeu(x) sélectionné(s). La cible du POC est 50.</p>
+      <div id="networkLibraryGames" class="network-library-list"></div>
+      <div class="button-row network-dialog-actions"><button value="cancel" class="button secondary">Annuler</button><button id="networkSaveSelectionBtn" value="default" class="button">Enregistrer la sélection</button></div>
     </form>
   </dialog>
-
-  <template id="gameTemplate">
-    <article class="game-card">
-      <button class="game-summary" type="button" aria-expanded="false">
-        <span class="quality-badge"></span>
-        <span class="game-main"><strong class="game-title"></strong><small class="game-meta"></small></span>
-        <span class="mini-progress"><i></i></span>
-        <span class="chevron">⌄</span>
-      </button>
-      <div class="game-detail hidden"><div class="recommendations"></div></div>
-    </article>
-  </template>
-
-  <script src="/app.js" defer></script>
+  <dialog id="gameDialog">
+    <div class="dialog-shell">
+      <button class="close" id="closeDialog" aria-label="Fermer">×</button>
+      <div id="dialogHero" class="dialog-hero"></div>
+      <nav class="subtabs" aria-label="Fiche du jeu"><button class="subtab active" data-panel="overview">Vue générale</button><button class="subtab" data-panel="profile">Profil IA</button><button class="subtab" data-panel="sources">Sources</button><button class="subtab" data-panel="similarities">Similarités</button><button class="subtab" data-panel="experience">Mon expérience</button><button class="subtab" data-panel="history">Historique</button></nav>
+      <div id="dialogBody" class="dialog-body"></div>
+    </div>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

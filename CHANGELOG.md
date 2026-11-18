@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.4.1 — correctif d’intégration
+
+- Restaure intégralement l’interface et les capacités de V0.9.3.2.
+- Ajoute le réseau expérimental comme sixième onglet au lieu de remplacer l’application.
+- Conserve l’administration et le contrôle `ADMIN_TOKEN` pour toutes les mutations.
+- Réutilise les tables créées par la première V0.9.4 sans supprimer de données.
+- Ajoute un remplissage d’embeddings en arrière-plan et son suivi dans l’interface.
+- Utilise les profils candidats à titre expérimental sans les promouvoir.
+- Ajoute trois tests de non-régression et d’idempotence.
+
 ## 0.9.3.2 — Consolidation sûre des preuves dupliquées
 
 - Un seul `claim` est conservé par chemin après normalisation des alias et après réparation Qwen.

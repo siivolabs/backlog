@@ -3,6 +3,7 @@ services:
     image: ghcr.io/siivolabs/backlog:dev
     container_name: backlog-test
     restart: unless-stopped
+    user: "1000:1000"
     environment:
       PORT: "3000"
       DATA_DIR: "/data"
@@ -20,6 +21,10 @@ services:
       AI_PAGE_TIMEOUT_MS: "${AI_PAGE_TIMEOUT_MS:-15000}"
       AI_DIAGNOSTIC_TIMEOUT_MS: "${AI_DIAGNOSTIC_TIMEOUT_MS:-15000}"
       AI_DIAGNOSTIC_GENERATION_TIMEOUT_MS: "${AI_DIAGNOSTIC_GENERATION_TIMEOUT_MS:-60000}"
+      EXPERIMENT_SIZE: "${EXPERIMENT_SIZE:-50}"
+      USE_DRAFT_PROFILES: "${USE_DRAFT_PROFILES:-true}"
+      USEFUL_SIMILARITY_THRESHOLD: "${USEFUL_SIMILARITY_THRESHOLD:-0.55}"
+      AI_EMBEDDING_TIMEOUT_MS: "${AI_EMBEDDING_TIMEOUT_MS:-120000}"
     volumes:
       - ./data:/data
     networks:

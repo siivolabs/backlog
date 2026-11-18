@@ -3,122 +3,165 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { BacklogDatabase } = require('./lib/database');
-const { OllamaClient } = require('./lib/ollama');
+const { URL } = require('node:url');
+const { BacklogDatabase, resolveDatabasePath } = require('./lib/database');
+const { AiEngine } = require('./lib/ai-engine');
+const { SimilarityExperiment } = require('./lib/similarity-experiment');
+const { OllamaClient } = require('./lib/network-ollama');
 
-const PORT = Number(process.env.PORT || 3094);
-const HOST = process.env.HOST || '0.0.0.0';
-const DB_FILE = process.env.BACKLOG_DB || '/data/backlog.sqlite';
-const database = new BacklogDatabase(DB_FILE, {
+const VERSION = '0.9.4.1';
+const PORT = Number(process.env.PORT || 3000);
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const databasePath = resolveDatabasePath(process.env);
+const database = new BacklogDatabase(databasePath);
+const aiEngine = new AiEngine({ database, env: process.env });
+const similarityExperiment = new SimilarityExperiment(databasePath, {
   experimentSize: Number(process.env.EXPERIMENT_SIZE || 50),
   useDraftProfiles: String(process.env.USE_DRAFT_PROFILES || 'true').toLowerCase() !== 'false'
 });
-const ollama = new OllamaClient(process.env.OLLAMA_URL, process.env.EMBEDDING_MODEL || 'embeddinggemma');
-const publicDir = path.join(__dirname, 'public');
-let activeJob = null;
+const networkOllama = new OllamaClient(aiEngine.config.ollamaBaseUrl, aiEngine.config.embeddingModel);
+let networkJob = null;
+aiEngine.start();
 
-function json(res, status, payload) {
-  const body = JSON.stringify(payload);
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(body),
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff'
-  });
+const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.ico':'image/x-icon' };
+
+function send(res, status, payload, headers = {}) {
+  const body = typeof payload === 'string' || Buffer.isBuffer(payload) ? payload : JSON.stringify(payload);
+  res.writeHead(status, { 'content-type': typeof payload === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control':'no-store', ...headers });
   res.end(body);
 }
 
-async function readJson(req) {
-  const chunks = []; let length = 0;
-  for await (const chunk of req) {
-    length += chunk.length;
-    if (length > 1_000_000) throw Object.assign(new Error('Corps de requête trop volumineux'), { status: 413 });
-    chunks.push(chunk);
-  }
+function jsonError(res, status, message, detail = null) { send(res,status,{error:message,detail}); }
+
+async function readJson(req, maxBytes = 1_000_000) {
+  const chunks=[]; let size=0;
+  for await (const chunk of req) { size+=chunk.length; if (size>maxBytes) throw Object.assign(new Error('Corps de requête trop volumineux'),{statusCode:413}); chunks.push(chunk); }
   if (!chunks.length) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw Object.assign(new Error('JSON invalide'), { status: 400 }); }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw Object.assign(new Error('JSON invalide'),{statusCode:400}); }
 }
 
-function serveStatic(urlPath, res) {
-  const relative = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-  const filename = path.resolve(publicDir, relative);
-  if (!filename.startsWith(`${publicDir}${path.sep}`) && filename !== path.join(publicDir, 'index.html')) return false;
-  if (!fs.existsSync(filename) || !fs.statSync(filename).isFile()) return false;
-  const type = ({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' })[path.extname(filename)] || 'application/octet-stream';
-  const data = fs.readFileSync(filename);
-  res.writeHead(200, { 'content-type': type, 'content-length': data.length, 'cache-control': type.startsWith('text/html') ? 'no-cache' : 'public, max-age=300', 'x-content-type-options': 'nosniff' });
-  res.end(data); return true;
+function requireAdmin(req) {
+  const expected=String(process.env.ADMIN_TOKEN||'');
+  if (!expected) return;
+  const supplied=String(req.headers['x-admin-token']||'');
+  const a=Buffer.from(expected); const b=Buffer.from(supplied);
+  if (a.length!==b.length || !require('node:crypto').timingSafeEqual(a,b)) throw Object.assign(new Error('Jeton administrateur requis'),{statusCode:401});
 }
 
-function match(pathname, expression) {
-  const result = pathname.match(expression);
-  return result ? result.slice(1).map(decodeURIComponent) : null;
+function publicConfig() {
+  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, ollamaConfigured:aiEngine.config.ollamaExplicitlyConfigured, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null, similarityNetwork:true };
 }
 
-async function api(req, res, url) {
-  const { pathname, searchParams } = url;
-  if (req.method === 'GET' && pathname === '/api/health') {
-    return json(res, 200, { status: 'ok', version: '0.9.4', database: DB_FILE, profileTable: database.hasProfileTable(), activeJob });
-  }
-  if (req.method === 'GET' && pathname === '/api/dashboard') return json(res, 200, database.dashboard());
-  if (req.method === 'GET' && pathname === '/api/games') return json(res, 200, { games: database.libraryGames(Number(searchParams.get('limit') || 5000)) });
-  if (req.method === 'GET' && pathname === '/api/job') return json(res, 200, { activeJob });
-  const recommendationMatch = match(pathname, /^\/api\/games\/([^/]+)\/similar$/);
-  if (req.method === 'GET' && recommendationMatch) return json(res, 200, { appId: recommendationMatch[0], recommendations: database.recommendations(recommendationMatch[0], Number(searchParams.get('limit') || 5)) });
-  if (req.method === 'POST' && pathname === '/api/selection') {
-    const body = await readJson(req);
-    if (!Array.isArray(body.appIds)) throw Object.assign(new Error('appIds doit être un tableau'), { status: 400 });
-    const count = database.setSelection(body.appIds);
-    return json(res, 200, { selected: count, message: `${count} jeux sélectionnés` });
-  }
-  if (req.method === 'POST' && pathname === '/api/network/rebuild') {
-    if (activeJob) throw Object.assign(new Error('Une opération est déjà en cours'), { status: 409 });
-    activeJob = { type: 'network', status: 'running', startedAt: new Date().toISOString() };
-    try {
-      const result = database.rebuildNetwork();
-      activeJob = null;
-      return json(res, 200, result);
-    } catch (error) { activeJob = null; throw error; }
-  }
-  if (req.method === 'POST' && pathname === '/api/embeddings/backfill') {
-    if (activeJob) throw Object.assign(new Error('Une opération est déjà en cours'), { status: 409 });
-    const body = await readJson(req);
-    activeJob = { type: 'embeddings', status: 'running', startedAt: new Date().toISOString(), current: 0, total: null };
-    try {
-      const result = await ollama.backfill(database, Number(body.limit || 50), (progress) => { activeJob = { ...activeJob, ...progress }; });
-      activeJob = null;
-      return json(res, 200, result);
-    } catch (error) { activeJob = null; throw error; }
-  }
-  if (req.method === 'POST' && pathname === '/api/feedback') {
-    const body = await readJson(req);
-    if (!body.sourceAppId || !body.targetAppId || !body.rating) throw Object.assign(new Error('sourceAppId, targetAppId et rating sont obligatoires'), { status: 400 });
-    return json(res, 200, database.saveFeedback(body));
-  }
-  return json(res, 404, { error: 'Route introuvable' });
+function addGameNames(items) {
+  return items.map((item)=>{ const game=database.getGame(item.to_app_id||item.appId); return {...item,game:game?{appId:game.appId,name:game.name,coverUrl:game.coverUrl}:null}; });
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+async function api(req,res,url) {
+  const method=req.method||'GET'; const pathname=url.pathname;
+  if (method==='GET'&&pathname==='/healthz') return send(res,200,{status:'ok',version:VERSION,database:path.basename(databasePath)});
+  if (method==='GET'&&pathname==='/api/v09/config') return send(res,200,publicConfig());
+  if (method==='GET'&&pathname==='/api/v09/dashboard') return send(res,200,database.getDashboard());
+  if (method==='GET'&&pathname==='/api/v09/games') {
+    return send(res,200,database.listGames({query:url.searchParams.get('query')||'',aiStatus:url.searchParams.get('aiStatus')||'all',limit:url.searchParams.get('limit')||60,offset:url.searchParams.get('offset')||0}));
+  }
+  if (method==='GET'&&pathname==='/api/v09/errors') return send(res,200,{items:database.listErrors(url.searchParams.get('limit')||100)});
+  if (method==='POST'&&pathname==='/api/v09/ai/test') { requireAdmin(req); return send(res,200,await aiEngine.testConnection()); }
+
+  let match=pathname.match(/^\/api\/v09\/games\/([^/]+)$/);
+  if (method==='GET'&&match) {
+    const appId=decodeURIComponent(match[1]); const game=database.getGame(appId); if(!game)return jsonError(res,404,'Jeu introuvable');
+    return send(res,200,{...database.attachAiState(game),profile:database.getProfileBundle(appId),dossier:database.getLatestDossier(appId),experience:database.getExperience(appId)});
+  }
+  match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/(profile|sources|similarities|history|experience)$/);
+  if (method==='GET'&&match) {
+    const appId=decodeURIComponent(match[1]); const type=match[2]; const bundle=database.getProfileBundle(appId);
+    if(type==='profile') return send(res,200,{bundle});
+    if(type==='sources') { const dossier=database.getLatestDossier(appId); return send(res,200,{dossier,items:dossier?.sources||bundle?.displayed?.sources||[]}); }
+    if(type==='similarities') return send(res,200,{items:addGameNames(database.similarities(appId))});
+    if(type==='history') return send(res,200,{items:database.history(appId)});
+    return send(res,200,{experience:database.getExperience(appId)});
+  }
+  match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/reanalyze$/);
+  if(method==='POST'&&match){ requireAdmin(req); const appId=decodeURIComponent(match[1]); if(!database.getGame(appId))return jsonError(res,404,'Jeu introuvable'); const job=aiEngine.enqueue(appId); return send(res,202,{job}); }
+  match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/(documents|analysis|embedding)$/);
+  if(method==='POST'&&match){ requireAdmin(req); const appId=decodeURIComponent(match[1]); if(!database.getGame(appId))return jsonError(res,404,'Jeu introuvable'); const job=aiEngine.enqueue(appId,match[2]); return send(res,202,{job}); }
+  match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/retry$/);
+  if(method==='POST'&&match){ requireAdmin(req); const appId=decodeURIComponent(match[1]); const job=aiEngine.enqueue(appId); return send(res,202,{job}); }
+  match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/experience$/);
+  if(method==='PUT'&&match){ requireAdmin(req); const body=await readJson(req); return send(res,200,{experience:database.saveExperience(decodeURIComponent(match[1]),body)}); }
+
+  match=pathname.match(/^\/api\/v09\/jobs\/(\d+)$/);
+  if(method==='GET'&&match){ const job=database.getJob(match[1]); return job?send(res,200,{job}):jsonError(res,404,'Tâche introuvable'); }
+  match=pathname.match(/^\/api\/v09\/profiles\/(\d+)\/review$/);
+  if(method==='PATCH'&&match){ requireAdmin(req); const body=await readJson(req); const profile=database.reviewProfile(match[1],body); return profile?send(res,200,{profile}):jsonError(res,404,'Version introuvable'); }
+  match=pathname.match(/^\/api\/v09\/profiles\/(\d+)\/fields\/(.+)\/review$/);
+  if(method==='PUT'&&match){ requireAdmin(req); const body=await readJson(req); const review=database.saveFieldReview(match[1],decodeURIComponent(match[2]),body); return send(res,200,{review}); }
+  if(method==='PUT'&&pathname==='/api/v09/feedback/similarity'){ requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:database.saveSimilarityFeedback(body)}); }
+
+
+  // Réseau expérimental 0.9.4.1 : extension additive de l'application existante.
+  if(method==='GET'&&pathname==='/api/v09/network/dashboard') return send(res,200,similarityExperiment.dashboard());
+  if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000))});
+  if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:networkJob});
+  match=pathname.match(/^\/api\/v09\/network\/games\/([^/]+)\/similar$/);
+  if(method==='GET'&&match) return send(res,200,{appId:decodeURIComponent(match[1]),recommendations:similarityExperiment.recommendations(decodeURIComponent(match[1]),Number(url.searchParams.get('limit')||5))});
+  if(method==='POST'&&pathname==='/api/v09/network/selection'){
+    requireAdmin(req); const body=await readJson(req);
+    if(!Array.isArray(body.appIds)) throw Object.assign(new Error('appIds doit être un tableau'),{statusCode:400});
+    return send(res,200,{selected:similarityExperiment.setSelection(body.appIds)});
+  }
+  if(method==='POST'&&pathname==='/api/v09/network/rebuild'){
+    requireAdmin(req);
+    if(networkJob?.status==='running') throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
+    networkJob={type:'network',status:'running',startedAt:new Date().toISOString()};
+    try { const result=similarityExperiment.rebuildNetwork(); networkJob={...networkJob,status:'completed',finishedAt:new Date().toISOString(),result}; return send(res,200,result); }
+    catch(error){ networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)}; throw error; }
+  }
+  if(method==='POST'&&pathname==='/api/v09/network/embeddings/backfill'){
+    requireAdmin(req); const body=await readJson(req);
+    if(networkJob?.status==='running') throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
+    networkJob={type:'embeddings',status:'running',startedAt:new Date().toISOString(),current:0,total:null};
+    const limit=Math.min(500,Math.max(1,Number(body.limit||50)));
+    setImmediate(async()=>{
+      try { const result=await networkOllama.backfill(similarityExperiment,limit,(progress)=>{networkJob={...networkJob,...progress};}); networkJob={...networkJob,status:'completed',finishedAt:new Date().toISOString(),result}; }
+      catch(error){ console.error(error); networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)}; }
+    });
+    return send(res,202,{job:networkJob});
+  }
+  if(method==='PUT'&&pathname==='/api/v09/network/feedback'){
+    requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:similarityExperiment.saveFeedback(body)});
+  }
+  return false;
+}
+
+function staticFile(req,res,url) {
+  const relative=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.replace(/^\//,''));
+  const filename=path.resolve(PUBLIC_DIR,relative);
+  if(!filename.startsWith(`${PUBLIC_DIR}${path.sep}`)&&filename!==path.join(PUBLIC_DIR,'index.html')) return jsonError(res,403,'Chemin interdit');
+  if(!fs.existsSync(filename)||!fs.statSync(filename).isFile()) return jsonError(res,404,'Ressource introuvable');
+  const content=fs.readFileSync(filename); const cache=path.extname(filename)==='.html'?'no-store':'public, max-age=300';
+  res.writeHead(200,{'content-type':MIME[path.extname(filename)]||'application/octet-stream','content-length':content.length,'cache-control':cache}); res.end(content);
+}
+
+const server=http.createServer(async(req,res)=>{
+  res.setHeader('x-content-type-options','nosniff'); res.setHeader('x-frame-options','DENY'); res.setHeader('referrer-policy','no-referrer'); res.setHeader('content-security-policy',"default-src 'self'; img-src 'self' https://cdn.akamai.steamstatic.com https://shared.akamai.steamstatic.com data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+  const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);
   try {
-    if (url.pathname.startsWith('/api/')) return await api(req, res, url);
-    if (req.method === 'GET' && serveStatic(url.pathname, res)) return;
-    json(res, 404, { error: 'Page introuvable' });
-  } catch (error) {
-    console.error(error);
-    json(res, Number(error.status || 500), { error: String(error.message || error) });
-  }
+    if(url.pathname==='/healthz'||url.pathname.startsWith('/api/')) { const handled=await api(req,res,url); if(handled===false)return jsonError(res,404,'Endpoint introuvable'); return; }
+    if(req.method!=='GET'&&req.method!=='HEAD') return jsonError(res,405,'Méthode non autorisée');
+    return staticFile(req,res,url);
+  } catch(error){ const status=Number(error.statusCode||500); if(status>=500)console.error(error); return jsonError(res,status,status>=500?'Erreur interne':error.message,process.env.NODE_ENV==='development'?String(error.stack||''):null); }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Backlog V0.9.4 — Réseau de similarité: http://${HOST}:${PORT}`);
-  console.log(`Base SQLite: ${DB_FILE}`);
+server.listen(PORT,'0.0.0.0',()=>{
+  console.log(`Backlog V${VERSION} — http://0.0.0.0:${PORT}`);
+  console.log(`SQLite : ${databasePath}`);
+  console.log(`Bibliothèque : ${database.discoverLibrarySource()?.table||'aucune table compatible détectée'}`);
+  console.log(`Ollama : ${aiEngine.config.ollamaBaseUrl} (${aiEngine.config.analysisModel} / ${aiEngine.config.embeddingModel})`);
+  console.log(`SearXNG : ${aiEngine.config.searxngBaseUrl?'configuré':'optionnel, non configuré'}`);
 });
 
-function shutdown() {
-  server.close(() => { database.close(); process.exit(0); });
-  setTimeout(() => process.exit(1), 5000).unref();
-}
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+function shutdown(){ aiEngine.stop(); server.close(()=>{similarityExperiment.close();database.close();process.exit(0);}); setTimeout(()=>process.exit(1),5000).unref(); }
+process.on('SIGTERM',shutdown); process.on('SIGINT',shutdown);
+
+module.exports={server,database,aiEngine,similarityExperiment,VERSION};

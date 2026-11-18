@@ -1,13 +1,15 @@
 {
-  "name": "backlog-similarity-lab",
-  "version": "0.9.4",
+  "name": "backlog",
+  "version": "0.9.4.1",
   "private": true,
-  "description": "Réseau expérimental de similarité pour Backlog",
+  "description": "Backlog complet avec base de connaissances IA et réseau expérimental de similarité intégré",
   "type": "commonjs",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js",
-    "check": "node --check server.js && node --check lib/database.js && node --check lib/profile.js && node --check lib/network.js && node --check lib/ollama.js"
+    "test": "node --test --test-reporter=spec",
+    "check": "node --check server.js && node --check lib/database.js && node --check lib/ai-engine.js && node --check lib/similarity-experiment.js && node --check lib/network-profile.js && node --check lib/network.js && node --check lib/network-ollama.js && node --check public/app.js"
   }
 }
