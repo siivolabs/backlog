@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.3 — Fiabilité factuelle et corrections apprenantes
+
+- Schéma de profil 2.1 : séparation de la topologie et de la génération de carte.
+- Persistance décomposée en sauvegarde intersession, modèle de réinitialisation et persistance du monde multijoueur.
+- Preuves détaillées par chemin dans `field_status.<dimension>.claims`.
+- Nouveau score de précision des preuves.
+- Seconde passe de vérification factuelle avec anomalies structurées.
+- Embeddings et validation bloqués lorsque le contrôle factuel n’est pas réussi.
+- Notes « À corriger » et corrections de champs réinjectées dans les réanalyses suivantes.
+- Migration SQLite additive vers 0.9.3.
+
 ## 0.9.2 — Profils d’expérience multidimensionnels
 
 - Nouveau schéma de profil 2.0 avec objets stricts par dimension.

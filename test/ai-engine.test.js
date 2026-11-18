@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cosine, profileText, PROFILE_SCHEMA, PROFILE_FORMAT, PROFILE_SCHEMA_VERSION } = require('../lib/ai-engine');
+const { cosine, profileText, PROFILE_SCHEMA, PROFILE_FORMAT, VERIFICATION_FORMAT, PROFILE_SCHEMA_VERSION } = require('../lib/ai-engine');
 
 test('cosine calcule la similarité et refuse les dimensions incohérentes',()=>{
   assert.equal(cosine([1,0],[1,0]),1);
@@ -75,10 +75,21 @@ test('l’analyse normale utilise Ollama Chat sans limite minuscule de tokens',a
   await engine.generateProfile({appId:'1',name:'Jeu de test'},[]);
   assert.equal(calls[0].url,'http://ollama:11434/api/chat');
   assert.equal(calls[0].body.stream,false);
-  assert.equal(calls[0].body.options.temperature,0.1);
+  assert.equal(calls[0].body.options.temperature,0.05);
   assert.equal(calls[0].body.think,false);
   assert.equal(calls[0].body.format.properties.schema_version.enum[0],PROFILE_SCHEMA_VERSION);
   assert.equal(PROFILE_FORMAT.properties.pace.anyOf[0].type,'object');
   assert.equal('num_predict' in calls[0].body.options,false);
   assert.deepEqual(calls[0].body.messages.map((message)=>message.role),['system','user']);
+});
+
+test('la seconde passe vérifie factuellement le profil avec un schéma strict',async()=>{
+  const calls=[];
+  const fakeFetch=async(url,options={})=>{calls.push(JSON.parse(options.body));return{ok:true,status:200,text:async()=>JSON.stringify({message:{content:JSON.stringify({status:'passed',checked_claims:4,issues:[]})}})};};
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  const result=await engine.verifyProfile({appId:'1',name:'Jeu de test'},[{title:'Source officielle',excerpt:'La carte est fixe et la progression est sauvegardée.'}],{schema_version:PROFILE_SCHEMA_VERSION},{fieldCorrections:[]});
+  assert.equal(result.status,'passed');
+  assert.equal(calls[0].temperature,undefined);
+  assert.equal(calls[0].options.temperature,0);
+  assert.equal(calls[0].format.properties.status.enum[0],VERIFICATION_FORMAT.properties.status.enum[0]);
 });

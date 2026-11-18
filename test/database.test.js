@@ -125,7 +125,7 @@ test('migration 0.9.0 vers 0.9.1 reste additive et conserve la version active',(
     assert.equal(database.db.prepare('SELECT COUNT(*) AS count FROM ai_profile_versions').get().count,1);
     assert.ok(database.columns('ai_profile_versions').includes('document_quality'));
     assert.ok(database.tableNames().includes('ai_document_dossiers'));
-    assert.equal(database.getMeta('schema_version'),'0.9.2');
+    assert.equal(database.getMeta('schema_version'),'0.9.3');
   } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -169,7 +169,7 @@ test('migration 0.9.1 conserve une ancienne table ai_document_sources incompatib
 });
 
 
-test('migration 0.9.2 ajoute la qualité sémantique sans réécrire les profils existants',()=>{
+test('migration 0.9.3 ajoute la qualité factuelle sans réécrire les profils existants',()=>{
   const {database,dir,profile}=fixture();
   try {
     const legacy=database.getActiveProfile('400');
@@ -187,7 +187,7 @@ test('migration 0.9.2 ajoute la qualité sémantique sans réécrire les profils
     assert.equal(candidate.semantic_quality_score,64);
     assert.equal(candidate.evidence_coverage,90);
     assert.equal(database.getActiveProfile('400').id,legacy.id);
-    assert.equal(database.getMeta('schema_version'),'0.9.2');
+    assert.equal(database.getMeta('schema_version'),'0.9.3');
   } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -196,5 +196,18 @@ test('refuse de valider un profil sémantiquement insuffisant',()=>{
   try {
     const candidate=database.insertProfileVersion({appId:'400',profile:{schema_version:'2.0'},documentQuality:'complete',completenessScore:95,profileQuality:'insufficient',profileCompletenessScore:25,lifecycleState:'draft'});
     assert.throws(()=>database.reviewProfile(candidate.id,{action:'validate'}),/sémantiquement insuffisant/i);
+  } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('réinjecte les corrections humaines et bloque un profil factuellement non vérifié',()=>{
+  const {database,dir}=fixture();
+  try {
+    const candidate=database.insertProfileVersion({appId:'400',profile:{schema_version:'2.1'},documentQuality:'complete',profileQuality:'complete',factualQuality:'warnings',verification:{status:'warnings',checked_claims:1,issues:[{field_path:'exploration.map_generation',severity:'warning',category:'overconfident',source_ids:['SOURCE-1'],explanation:'La source ne suffit pas à conclure.'}]}});
+    database.saveFieldReview(candidate.id,'exploration.map_generation',{status:'corrected',correctedValue:'fixed',note:'La carte est fixe.'});
+    database.reviewProfile(candidate.id,{action:'needs_review',notes:'Conserver la carte fixe lors de la prochaine analyse.'});
+    const guidance=database.getProfileGuidance('400');
+    assert.equal(guidance.fieldCorrections[0].correctedValue,'fixed');
+    assert.match(guidance.profileNotes[0],/carte fixe/i);
+    assert.throws(()=>database.reviewProfile(candidate.id,{action:'validate'}),/vérification factuelle/i);
   } finally {database.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
