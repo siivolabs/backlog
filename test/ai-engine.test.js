@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cosine, profileText, PROFILE_SCHEMA, PROFILE_FORMAT, VERIFICATION_FORMAT, PROFILE_SCHEMA_VERSION } = require('../lib/ai-engine');
+const { cosine, profileText, PROFILE_SCHEMA, PROFILE_FORMAT, VERIFICATION_FORMAT, PROFILE_SCHEMA_VERSION, ProfileValidationError, formatAnalysisError } = require('../lib/ai-engine');
 
 test('cosine calcule la similarité et refuse les dimensions incohérentes',()=>{
   assert.equal(cosine([1,0],[1,0]),1);
@@ -92,4 +92,14 @@ test('la seconde passe vérifie factuellement le profil avec un schéma strict',
   assert.equal(calls[0].temperature,undefined);
   assert.equal(calls[0].options.temperature,0);
   assert.equal(calls[0].format.properties.status.enum[0],VERIFICATION_FORMAT.properties.status.enum[0]);
+});
+
+test('le détail d’une erreur de chemin est lisible sans consulter les logs Docker',()=>{
+  const error=new ProfileValidationError('atmosphere_themes: chemin de preuve invalide (atmosphere_theme.tone)',{code:'INVALID_EVIDENCE_PATH',details:{dimension:'atmosphere_themes',received:'atmosphere_theme.tone',expected:'atmosphere_themes.tone',repair_attempted:true,repair_detail:'Proposition ambiguë'}});
+  const detail=formatAnalysisError(error,'path_repair');
+  assert.match(detail,/Erreur de validation du profil/);
+  assert.match(detail,/Dimension : atmosphere_themes/);
+  assert.match(detail,/Chemin reçu : atmosphere_theme\.tone/);
+  assert.match(detail,/Chemin attendu : atmosphere_themes\.tone/);
+  assert.match(detail,/Réparation contrôlée : tentée sans succès/);
 });

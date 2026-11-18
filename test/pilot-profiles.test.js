@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION } = require('../lib/ai-engine');
+const { AiEngine, validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths } = require('../lib/ai-engine');
 
 const evidence = (status='documented', source_ids=['SOURCE-1'], note='Caractéristique établie par le dossier documentaire.', path='summary') => ({status,source_ids,confidence:status==='unknown'?'unknown':'high',note,claims:status==='unknown'?[]:[{path,source_ids,support:status==='human_corrected'?'human':'direct',confidence:'high',note:'La caractéristique est soutenue par la preuve indiquée.'}]});
 
@@ -87,4 +87,46 @@ test('la complétude sémantique pénalise une dimension vide même avec un doss
   const incomplete=assessProfileContent(profile,{quality_status:'complete',completeness_score:100});
   assert.ok(incomplete.profileCompletenessScore<complete.profileCompletenessScore);
   assert.equal(incomplete.documentCompletenessScore,100);
+});
+
+test('normalise l’alias connu atmosphere_theme sans appeler Qwen ni modifier le contenu',()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.atmosphere_themes.claims[0].path='atmosphere_theme.description';
+  const before=structuredClone(profile);
+  const result=normalizeKnownEvidencePaths(profile);
+  assert.equal(result.profile.field_status.atmosphere_themes.claims[0].path,'atmosphere_themes.description');
+  assert.equal(result.repairs.length,1);
+  assert.equal(profile.field_status.atmosphere_themes.claims[0].path,before.field_status.atmosphere_themes.claims[0].path,'la fonction ne mute pas la réponse brute');
+  const expected=structuredClone(before);expected.field_status.atmosphere_themes.claims[0].path='atmosphere_themes.description';
+  assert.deepEqual(result.profile,expected);
+  assert.equal(validateProfileContent(result.profile,{sourceCount:1}),true);
+});
+
+test('la validation stricte refuse encore un chemin inexistant dans la bonne dimension',()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.atmosphere_themes.claims[0].path='atmosphere_themes.tonality';
+  assert.throws(()=>validateProfileContent(profile,{sourceCount:1}),(error)=>error.code==='INVALID_EVIDENCE_PATH'&&error.details.dimension==='atmosphere_themes'&&error.details.received==='atmosphere_themes.tonality');
+});
+
+test('une réparation Qwen contrôlée ne peut changer que vers un chemin autorisé de la même dimension',async()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.atmosphere_themes.claims[0].path='atmosphere_themes.descriptio';
+  const expected=structuredClone(profile);expected.field_status.atmosphere_themes.claims[0].path='atmosphere_themes.description';
+  const calls=[];
+  const fakeFetch=async(url,options)=>{calls.push(JSON.parse(options.body));return{ok:true,status:200,text:async()=>JSON.stringify({message:{content:JSON.stringify({repairs:[{dimension:'atmosphere_themes',from:'atmosphere_themes.descriptio',to:'atmosphere_themes.description'}]})}})};};
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  const result=await engine.repairEvidencePaths(profile);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].options.temperature,0);
+  assert.equal(result.repairAttempted,true);
+  assert.deepEqual(result.profile,expected,'aucune valeur hors chemin ne doit changer');
+  assert.equal(validateProfileContent(result.profile,{sourceCount:1}),true);
+});
+
+test('une proposition de réparation hors schéma est ignorée puis rejetée',async()=>{
+  const profile=structuredClone(pilots.Satisfactory);
+  profile.field_status.atmosphere_themes.claims[0].path='atmosphere_themes.descriptio';
+  const fakeFetch=async()=>({ok:true,status:200,text:async()=>JSON.stringify({message:{content:JSON.stringify({repairs:[{dimension:'atmosphere_themes',from:'atmosphere_themes.descriptio',to:'progression.description'}]})}})});
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  await assert.rejects(()=>engine.repairEvidencePaths(profile),(error)=>error.code==='INVALID_EVIDENCE_PATH'&&error.details.repair_attempted===true);
 });

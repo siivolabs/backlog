@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.3.1 — Correctif des chemins de preuve
+
+- Alias explicite `atmosphere_theme.*` → `atmosphere_themes.*` avant validation.
+- Contrôle de l’existence réelle des chemins de preuve, y compris les indices de listes.
+- Une seule tentative Qwen pour les chemins non couverts par un alias connu.
+- Réparations bornées aux cibles autorisées de la même dimension ; aucune valeur du profil ne peut être modifiée.
+- Validation stricte relancée après réparation et rejet si un chemin reste invalide.
+- Erreurs structurées avec étape, code, dimension, chemin reçu et chemin attendu lorsque celui-ci est connu.
+- Détail complet visible dans la fiche du jeu et dans la vue **Erreurs**.
+- Schéma SQLite 0.9.3 inchangé ; aucune donnée historique réécrite.
+- Tests de non-régression portés de 28 à 35 cas.
+
 ## 0.9.3 — Fiabilité factuelle et corrections apprenantes
 
 - Schéma de profil 2.1 : séparation de la topologie et de la génération de carte.

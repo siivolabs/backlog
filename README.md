@@ -1,6 +1,18 @@
-# Backlog 0.9.3
+# Backlog 0.9.3.1
 
-Backlog 0.9.3 transforme le profil « complet » de la 0.9.2 en profil **vérifiable**. La génération reste multidimensionnelle, mais une seconde passe contrôle maintenant les affirmations contre les sources citées et contre les corrections humaines déjà enregistrées.
+Backlog 0.9.3.1 est le correctif de fiabilité de la 0.9.3. Il conserve le schéma de profil 2.1 et les données SQLite existantes, tout en empêchant une faute de nomenclature dans un chemin de preuve de faire échouer inutilement une analyse.
+
+## Correctifs 0.9.3.1
+
+- normalisation déterministe des alias explicitement autorisés, dont `atmosphere_theme.*` vers `atmosphere_themes.*` ;
+- validation stricte de l’existence réelle de chaque chemin dans le profil généré ;
+- une seule tentative de réparation Qwen pour les chemins encore invalides, avec sortie limitée à des couples `from`/`to` ;
+- application d’une réparation uniquement si la cible appartient aux chemins autorisés de la même dimension ;
+- rejet inchangé du profil lorsqu’une réparation est absente, ambiguë, hors dimension ou hors schéma ;
+- affichage du code, de l’étape et du détail complet de l’erreur dans la fiche du jeu et la vue **Erreurs** ;
+- aucune modification du schéma SQLite 0.9.3 et aucune réécriture des profils existants.
+
+La génération reste multidimensionnelle et la seconde passe contrôle les affirmations contre les sources citées et contre les corrections humaines déjà enregistrées.
 
 ## Nouveautés 0.9.3
 
@@ -108,6 +120,7 @@ Un profil peut donc être structurellement complet tout en restant bloqué pour 
 | `AI_EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
 | `AI_ANALYSIS_TIMEOUT_MS` | `480000` | Délai de génération |
 | `AI_VERIFICATION_TIMEOUT_MS` | `480000` | Délai de vérification |
+| `AI_PATH_REPAIR_TIMEOUT_MS` | `120000` | Délai de l’unique tentative de réparation de chemins |
 | `AI_EMBEDDING_TIMEOUT_MS` | `120000` | Délai d’embedding |
 | `SEARXNG_BASE_URL` | vide | API SearXNG |
 
@@ -116,7 +129,7 @@ Un profil peut donc être structurellement complet tout en restant bloqué pour 
 ```bash
 npm run check
 npm test
-DATA_DIR=/tmp/backlog-v093 PORT=3000 node server.js
+DATA_DIR=/tmp/backlog-v0931 PORT=3000 node server.js
 curl http://127.0.0.1:3000/healthz
 ```
 

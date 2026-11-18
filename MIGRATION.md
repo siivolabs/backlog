@@ -1,4 +1,8 @@
-# Migration vers Backlog 0.9.3
+# Migration vers Backlog 0.9.3.1
+
+## Depuis Backlog 0.9.3
+
+Le correctif 0.9.3.1 ne modifie aucune table ni colonne. La valeur `schema_version=0.9.3` dans `ai_v09_meta` reste volontairement inchangée : elle décrit le schéma SQLite, commun aux versions 0.9.3 et 0.9.3.1. Le remplacement des fichiers applicatifs ne réécrit ni les profils, ni les dossiers, ni les tâches, ni les embeddings existants.
 
 ## Principe de sécurité
 
@@ -26,8 +30,8 @@ Une réanalyse individuelle crée une version `schema_version: "2.1"`. La versio
 
 3. Si le fichier SQLite a un nom non standard, définir `DATABASE_PATH` explicitement.
 4. Conserver le montage `./data:/data` et les adresses Ollama/SearXNG accessibles depuis le conteneur.
-5. Publier les fichiers 0.9.3 à la racine du dépôt et reconstruire l’image.
-6. Vérifier `/healthz` : la version doit être `0.9.3`.
+5. Publier les fichiers 0.9.3.1 à la racine du dépôt et reconstruire l’image.
+6. Vérifier `/healthz` : la version doit être `0.9.3.1`.
 7. Exécuter **Tester Ollama** et vérifier l’étape `completed`.
 8. Comparer le nombre de jeux et de versions de profils avec la sauvegarde.
 9. Réanalyser uniquement Euro Truck Simulator 2, Control et Satisfactory.
@@ -46,7 +50,7 @@ Une réanalyse individuelle crée une version `schema_version: "2.1"`. La versio
 
 ## Retour arrière
 
-1. Arrêter le conteneur 0.9.3.
+1. Arrêter le conteneur 0.9.3.1.
 2. Restaurer le dossier de sauvegarde complet dans `/data`.
 3. Redéployer l’image précédente.
 
