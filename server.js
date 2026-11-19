@@ -10,7 +10,7 @@ const { SimilarityExperiment } = require('./lib/similarity-experiment');
 const { OllamaClient } = require('./lib/network-ollama');
 const { NetworkCompletionService } = require('./lib/network-completion');
 
-const VERSION = '0.9.4.1';
+const VERSION = '0.9.4.2';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);
@@ -105,7 +105,7 @@ async function api(req,res,url) {
   if(method==='PUT'&&pathname==='/api/v09/feedback/similarity'){ requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:database.saveSimilarityFeedback(body)}); }
 
 
-  // Réseau expérimental 0.9.4.1 : extension additive de l'application existante.
+  // Réseau expérimental 0.9.4.2 : extension additive de l'application existante.
   if(method==='GET'&&pathname==='/api/v09/network/dashboard') return send(res,200,similarityExperiment.dashboard());
   if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000))});
   if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:networkJob});

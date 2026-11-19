@@ -89,6 +89,49 @@ test('complète automatiquement le lot, préserve les profils et recalcule toute
   }
 });
 
+test('poursuit les jeux suivants lorsqu’un profil du lot échoue', async () => {
+  const { directory, database, experiment } = fixture();
+  let embeddingAttempts = 0;
+  const embeddingClient = {
+    model: 'embeddinggemma',
+    async embedText() {
+      embeddingAttempts += 1;
+      throw new Error('Échec d’embedding simulé pour le profil convertible');
+    }
+  };
+  const aiEngine = {
+    checkEmbedding(vector) { assert.equal(vector.length, 3); },
+    enqueue(appId, operation) {
+      assert.equal(appId, '3','le jeu suivant doit être traité malgré l’échec précédent');
+      assert.equal(operation, 'network');
+      const job = database.createJob(appId, operation);
+      const active = database.getActiveProfile(appId);
+      const version = database.insertProfileVersion({
+        appId, profile: modernProfile('après erreur'), embedding: [0.6, 0.3, 0.1], embeddingModel: 'embeddinggemma',
+        lifecycleState: 'draft', basedOnVersionId: active.id, profileSchemaVersion: '2.1', model: 'qwen3:32b'
+      });
+      database.updateJob(job.id, { status: 'completed', current_step: 'completed', message: 'Profil suivant généré', target_version_id: version.id, finished_at: new Date().toISOString() });
+      return database.getJob(job.id);
+    }
+  };
+  const service = new NetworkCompletionService({ experiment, database, aiEngine, embeddingClient, pollIntervalMs: 1, jobTimeoutMs: 1000, logger: { error() {} } });
+
+  try {
+    const result = await service.run();
+    assert.equal(embeddingAttempts, 1);
+    assert.equal(result.status, 'completed_with_errors');
+    assert.deepEqual(result.counts, { reused: 1, converted: 0, embedded: 1, regenerated: 1, failed: 1 });
+    assert.equal(result.results.find((item) => item.appId === '2').status, 'failed');
+    assert.equal(result.results.find((item) => item.appId === '3').status, 'completed');
+    assert.equal(result.network.usableCount, 3,'le profil converti reste exploitable et pourra être repris sans réécriture');
+    assert.equal(result.network.embeddedCount, 2);
+    assert.equal(result.network.pairCount, 3,'la reconstruction couvre tous les profils comparables, même si un embedding reste à reprendre');
+    assert.equal(experiment.latestCompletionRun().status, 'completed_with_errors');
+  } finally {
+    experiment.close(); database.close(); fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 
 test('le lot cible de 50 jeux produit 50 embeddings et 1 225 paires sans validation jeu par jeu', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-completion-50-'));

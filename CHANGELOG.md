@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.4.2 — correctif `path_repair` sur `uncertainties`
+
+- Autorise `uncertainties: []` lorsqu’aucune incertitude pertinente n’est identifiée.
+- Normalise uniquement le statut `documented` incohérent de cette liste vide vers `unknown`, sans inventer de contenu.
+- Demande explicitement à Qwen de ne jamais remplir artificiellement la liste des incertitudes.
+- Maintient la validation stricte de toutes les dimensions principales.
+- Vérifie que le traitement par lot poursuit les jeux suivants après un échec individuel et reconstruit le réseau avec un bilan `completed_with_errors`.
+- Ne modifie ni le schéma SQLite, ni les profils historiques, ni les mécanismes de versionnement existants.
+- Porte la suite à 52 tests.
+
 ## 0.9.4.1 — correctif d’intégration
 
 - Restaure intégralement l’interface et les capacités de V0.9.3.2.

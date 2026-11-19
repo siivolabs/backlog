@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { AiEngine, validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths, mergeCompatibleEvidenceClaims } = require('../lib/ai-engine');
+const { AiEngine, validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths, normalizeEmptyUncertaintiesEvidence, mergeCompatibleEvidenceClaims } = require('../lib/ai-engine');
 
 const evidence = (status='documented', source_ids=['SOURCE-1'], note='Caractéristique établie par le dossier documentaire.', path='summary') => ({status,source_ids,confidence:status==='unknown'?'unknown':'high',note,claims:status==='unknown'?[]:[{path,source_ids,support:status==='human_corrected'?'human':'direct',confidence:'high',note:'La caractéristique est soutenue par la preuve indiquée.'}]});
 
@@ -77,6 +77,36 @@ test('une dimension inconnue utilise null et non la chaîne unknown',()=>{
   assert.equal(validateProfileContent(profile,{sourceCount:1}),true);
   profile.multiplayer='unknown';
   assert.throws(()=>validateProfileContent(profile,{sourceCount:1}),/type|string|statut/i);
+});
+
+test('normalise uncertainties vide marqué documented sans inventer de contenu',async()=>{
+  const profile=structuredClone(pilots.Control);
+  profile.field_status.uncertainties=evidence('documented',['SOURCE-1'],'Les sources ont été examinées.','uncertainties');
+  const before=structuredClone(profile);
+  const normalized=normalizeEmptyUncertaintiesEvidence(profile);
+  assert.deepEqual(profile,before,'la réponse brute ne doit pas être mutée');
+  assert.deepEqual(normalized.profile.uncertainties,[],'aucune incertitude ne doit être fabriquée');
+  assert.equal(normalized.profile.field_status.uncertainties.status,'unknown');
+  assert.deepEqual(normalized.profile.field_status.uncertainties.source_ids,[]);
+  assert.equal(normalized.profile.field_status.uncertainties.confidence,'unknown');
+  assert.deepEqual(normalized.profile.field_status.uncertainties.claims,[]);
+  assert.equal(normalized.normalizations.length,1);
+  assert.equal(validateProfileContent(normalized.profile,{sourceCount:1}),true);
+
+  let calls=0;
+  const engine=new AiEngine({database:{},fetchImpl:async()=>{calls+=1;throw new Error('Qwen ne doit pas être appelé');},env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  const repaired=await engine.repairEvidencePaths(profile);
+  assert.equal(calls,0);
+  assert.deepEqual(repaired.profile.uncertainties,[]);
+  assert.equal(repaired.profile.field_status.uncertainties.status,'unknown');
+  assert.equal(repaired.evidenceNormalizations.length,1);
+});
+
+test('conserve la validation stricte des dimensions principales vides',()=>{
+  const profile=structuredClone(pilots.Control);
+  profile.gameplay_loops=[];
+  profile.field_status.gameplay_loops=evidence('documented',['SOURCE-1'],'Les sources ont été examinées.','gameplay_loops');
+  assert.throws(()=>validateProfileContent(profile,{sourceCount:1}),/gameplay_loops: contenu manquant pour le statut documented/);
 });
 
 test('la complétude sémantique pénalise une dimension vide même avec un dossier complet',()=>{

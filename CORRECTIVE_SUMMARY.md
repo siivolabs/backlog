@@ -1,4 +1,12 @@
-# Correctif V0.9.4.1 — résumé technique
+# Correctif V0.9.4.2 — résumé technique
+
+## Correctif ciblé `uncertainties`
+
+- `uncertainties: []` est accepté lorsque Qwen n’identifie aucune incertitude pertinente.
+- Un statut `documented` incohérent sur cette liste vide est normalisé en `unknown`, avec sources et preuves détaillées vidées.
+- Aucun objet d’incertitude n’est créé pour satisfaire artificiellement le schéma.
+- La règle reste strictement limitée à `uncertainties`; les dimensions principales conservent leur validation existante.
+- Le traitement par lot enregistre l’échec d’un jeu, poursuit les suivants et termine avec l’état `completed_with_errors` le cas échéant.
 
 ## Cause corrigée
 

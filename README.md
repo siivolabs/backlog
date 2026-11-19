@@ -1,6 +1,8 @@
-# Backlog V0.9.4.1 — correctif d’intégration
+# Backlog V0.9.4.2 — correctif `uncertainties` et résilience du lot
 
-Cette livraison corrige la régression de la première V0.9.4. Elle repart intégralement de **Backlog V0.9.3.2** et ajoute le réseau expérimental comme une section de la même application.
+Cette livraison conserve l’intégration complète de V0.9.4.1 et corrige l’échec `path_repair` provoqué par `uncertainties: []` associé à un statut `documented`.
+
+Lorsqu’aucune incertitude pertinente n’est identifiée, Backlog conserve la liste vide et normalise uniquement sa provenance vers `unknown`, sans créer d’incertitude artificielle. Les autres dimensions restent soumises à la validation stricte.
 
 ## Ce qui est préservé
 
@@ -103,4 +105,4 @@ npm test
 npm run check
 ```
 
-La livraison comprend **49 tests** couvrant les fonctions historiques, l’intégration du réseau, la conversion des profils V1, la régénération Qwen3, la création d’embeddings EmbeddingGemma, la non-promotion des candidats, la reprise idempotente et la migration SQLite additive.
+La livraison comprend **52 tests** couvrant les fonctions historiques, l’intégration du réseau, la conversion des profils V1, la régénération Qwen3, la création d’embeddings EmbeddingGemma, la non-promotion des candidats, la reprise idempotente, la migration SQLite additive, la normalisation de `uncertainties: []`, la validation stricte des dimensions principales et la poursuite du lot après un échec individuel.

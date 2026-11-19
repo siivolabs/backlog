@@ -1,16 +1,19 @@
-# Vérification du correctif V0.9.4.1
+# Vérification du correctif V0.9.4.2
 
 ## Contrôles automatisés
 
 - syntaxe de tous les modules serveur, réseau et interface ;
-- 49 tests réussis ;
+- 52 tests réussis ;
 - migration du réseau idempotente ;
 - profil candidat utilisable sans changement de son état ;
 - conversion d’un profil V1 imbriqué vers les 11 dimensions communes sans exploiter les métadonnées de source ;
 - orchestration complète : réutilisation, conversion, embedding, régénération et recalcul des paires ;
 - opération IA `network` vérifiée avec Qwen3 puis EmbeddingGemma, sans promotion de la candidate ;
 - reprise idempotente sans nouvelle version de profil ;
-- application complète et réseau sur la même base SQLite.
+- application complète et réseau sur la même base SQLite ;
+- `uncertainties: []` avec statut `documented` normalisé sans ajout de contenu ;
+- dimensions principales toujours refusées lorsqu’elles sont vides avec un statut documentaire ;
+- poursuite du traitement par lot et reconstruction du réseau après un échec individuel.
 
 ## Contrôles fonctionnels attendus
 

@@ -1,8 +1,8 @@
-# Migration vers Backlog V0.9.4.1
+# Migration vers Backlog V0.9.4.2
 
 ## Principe
 
-V0.9.4.1 est une correction de la première V0.9.4 autonome. Elle restaure l’application complète V0.9.3.2 et intègre le laboratoire de similarité dans la même interface et sur le même port.
+V0.9.4.2 reprend la base V0.9.4.1 et corrige uniquement le traitement des profils où `uncertainties` est vide malgré un statut documentaire. Aucune nouvelle table et aucune migration de données ne sont ajoutées par ce correctif.
 
 ## Avant la mise à jour
 
@@ -19,6 +19,7 @@ Ne supprimez pas le dossier `data` et ne réinitialisez pas SQLite.
 - Aucune promotion de profil candidat n’est effectuée.
 - Aucune réanalyse ou génération d’embedding n’est lancée au démarrage.
 - **Compléter le réseau** doit être lancé explicitement avec le jeton administrateur. Les anciens profils restent intacts, les conversions sont stockées séparément et les régénérations créent des versions supplémentaires.
+- Un échec sur un jeu est enregistré dans le suivi du lot et n’empêche pas le traitement des jeux suivants.
 
 Tables nouvelles du correctif de complétion :
 
