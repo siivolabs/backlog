@@ -1,108 +1,126 @@
-# Backlog V0.9.4.2 — correctif `uncertainties` et résilience du lot
+# Backlog V0.9.4.3 — campagnes IA supervisées et reprenables
 
-Cette livraison conserve l’intégration complète de V0.9.4.1 et corrige l’échec `path_repair` provoqué par `uncertainties: []` associé à un statut `documented`.
+Backlog V0.9.4.3 conserve l’application complète (bibliothèque, fiches, profils, sources, historique, expérience personnelle, administration et réseau de similarité) et ajoute une supervision persistante des campagnes d’analyse.
 
-Lorsqu’aucune incertitude pertinente n’est identifiée, Backlog conserve la liste vide et normalise uniquement sa provenance vers `unknown`, sans créer d’incertitude artificielle. Les autres dimensions restent soumises à la validation stricte.
+## Fonctions V0.9.4.3
 
-## Ce qui est préservé
+### Supervision sans pourcentage artificiel
 
-- tableau de bord IA ;
-- bibliothèque complète et pagination ;
-- fiches détaillées ;
-- profils, sources, historique et révision ;
-- réanalyse complète ou par étape ;
-- administration IA et jeton `ADMIN_TOKEN` ;
-- Ollama, SearXNG et file de tâches ;
-- données SQLite existantes.
+L’interface affiche l’étape réelle de chaque jeu :
 
-## Ce qui est ajouté
+1. dossier documentaire ;
+2. génération Qwen ;
+3. normalisation des chemins ;
+4. vérification factuelle ;
+5. embedding ;
+6. stockage d’une nouvelle version ;
+7. similarités.
 
-Un sixième onglet **Réseau de similarité** permet de :
+Chaque étape possède un état, une durée réelle et des événements horodatés. Le journal et les points de reprise sont stockés dans SQLite et restent disponibles après un rechargement de page ou un redémarrage.
 
-- sélectionner le périmètre expérimental (50 jeux par défaut) ;
-- utiliser le meilleur profil `active` ou `draft` sans le promouvoir ;
-- compléter tout le réseau en une seule opération : réutilisation, conversion des anciens profils, régénération Qwen3 si nécessaire et embeddings EmbeddingGemma ;
-- suivre le traitement jeu par jeu sans validation manuelle obligatoire ;
-- calculer toutes les paires du périmètre ;
-- consulter le Top 5, les ressemblances et les différences ;
-- enregistrer une évaluation séparée des goûts personnels ;
-- suivre la couverture horizontale et la qualité verticale.
+### Suspension, reprise et interruptions Ollama
 
-Les fiches détaillées conservent leur onglet **Similarités** et y affichent également les voisins du réseau expérimental lorsqu’ils existent.
+- **Suspendre** arrête la requête IA active lorsque possible et place la campagne dans un état persistant.
+- **Reprendre** repart de la dernière étape terminée.
+- Une interruption réseau ou une indisponibilité Ollama est classée `infrastructure` et suspend automatiquement la campagne au lieu de transformer tous les jeux suivants en échecs.
+- Les résultats intermédiaires déjà terminés (dossier, réponse Qwen, profil réparé, vérification, embedding) sont réutilisés.
 
-## Migration SQLite
+### Campagnes intelligentes ou complètes
 
-La migration est additive. Elle crée ou réutilise uniquement :
+- **Compléter le réseau** réutilise les profils et embeddings valides et ne calcule que ce qui manque.
+- **Reconstruire les 50 analyses** force une nouvelle analyse complète de chaque jeu sélectionné.
+- Une reconstruction complète crée des versions candidates supplémentaires : elle ne remplace pas les versions actives et ne supprime aucune analyse historique.
 
-- `similarity_experiment_games`
-- `similarity_edges_v094`
-- `recommendation_feedback_v094`
-- `similarity_runs_v094`
-- `similarity_profile_adapters_v0941`
-- `similarity_completion_runs_v0941`
-- `similarity_completion_items_v0941`
+### File d’attente
 
-Elle ne supprime aucune table et ne promeut aucun profil. Les anciens profils convertibles restent inchangés : leur représentation comparable est enregistrée séparément dans `similarity_profile_adapters_v0941`. Le champ `embedding_json` n’est mis à jour que pour un profil exploitable dépourvu de vecteur. Une régénération Qwen3 crée une version supplémentaire `draft` lorsqu’une version active existe.
+La file persistante permet de :
 
-Les tables déjà créées par la première V0.9.4 sont réutilisées de façon idempotente.
+- placer un jeu en priorité ;
+- retirer un jeu sans supprimer ses données ;
+- relancer uniquement les erreurs ;
+- reprendre une campagne interrompue après redémarrage.
+
+Les erreurs sont classées en `infrastructure`, `technique`, `qualite`, `documentaire` ou `interruption`. Les erreurs techniques peuvent être retentées automatiquement ; les pannes d’infrastructure provoquent une suspension sûre.
+
+### Bilan de campagne
+
+À la fin, Backlog enregistre et affiche : jeux traités, profils exploitables, embeddings, relations, annulations, durées par étape, durée totale et répartition statistique des erreurs.
+
+### Recherche et navigation
+
+- La bibliothèque et le mini-réseau recherchent par titre ou par **Steam AppID exact** lorsque la requête est numérique.
+- Les filtres du réseau couvrent les profils exploitables, profils insuffisants, embeddings, erreurs et jeux participant au réseau.
+- Les fiches ouvrent directement le jeu dans le réseau et le réseau ouvre directement une fiche ou un voisin.
+- Recherches, filtres et vue active sont conservés dans la session du navigateur.
+
+## Compatibilité et données
+
+La migration est uniquement additive. Elle conserve notamment :
+
+- les tables et données existantes ;
+- les profils actifs, candidats, rejetés et historiques ;
+- les dossiers documentaires et sources ;
+- les réglages `ADMIN_TOKEN`, Ollama et SearXNG ;
+- les tables du réseau V0.9.4 et de complétion V0.9.4.1.
+
+V0.9.4.3 ajoute deux tables :
+
+- `ai_analysis_checkpoints_v0943` ;
+- `ai_analysis_events_v0943`.
+
+Elle ajoute aussi des colonnes de supervision aux tables de tâches et de campagnes existantes. Les migrations sont idempotentes.
 
 ## Déploiement
 
-1. Sauvegarder la base :
+1. Arrêter Backlog et sauvegarder SQLite :
 
    ```bash
-   cp ./data/backlog.sqlite ./data/backlog.sqlite.bak-$(date +%Y%m%d-%H%M%S)
+   cp /srv/docker/backlog/data/backlog.sqlite \
+      /srv/docker/backlog/data/backlog.sqlite.bak-$(date +%Y%m%d-%H%M%S)
    ```
 
-2. Remplacer les sources de l’image par cette archive puis reconstruire l’image `dev`.
-3. Conserver le même montage : `./data:/data`.
-4. Conserver le jeton `ADMIN_TOKEN` et les URL Ollama/SearXNG.
-5. Recréer le conteneur, pas seulement le redémarrer.
+2. Publier le contenu de cette archive dans le dépôt GitHub et reconstruire l’image `dev`.
+3. Conserver le montage `./data:/data`, `ADMIN_TOKEN`, `OLLAMA_BASE_URL` et `SEARXNG_BASE_URL`.
+4. Recréer le conteneur.
+5. Ne supprimer ni `data` ni `backlog.sqlite`.
 
-Le `compose.yaml` fourni exécute le conteneur avec `user: "1000:1000"`, `read_only: true`, `cap_drop: ALL` et un `/tmp` en `tmpfs`.
+Le `compose.yaml` conserve :
 
-Vérification après déploiement :
+```yaml
+user: "1000:1000"
+read_only: true
+cap_drop:
+  - ALL
+tmpfs:
+  - /tmp
+```
+
+## Vérification
 
 ```bash
-docker inspect backlog-test --format 'User={{.Config.User}} CapDrop={{json .HostConfig.CapDrop}} ReadOnly={{.HostConfig.ReadonlyRootfs}}'
-docker logs --tail 30 backlog-test
+npm run check
+npm test
 ```
 
-Résultat attendu :
+Après démarrage :
 
-```text
-User=1000:1000 CapDrop=["ALL"] ReadOnly=true
+```bash
+curl -fsS http://127.0.0.1:3000/healthz
 ```
 
-## Premier parcours
+Le résultat doit annoncer la version `0.9.4.3`.
 
-1. Vérifier la bibliothèque et ouvrir quelques fiches.
-2. Ouvrir **Administration IA**, saisir le jeton et tester Ollama.
-3. Ouvrir **Réseau de similarité**.
-4. Vérifier ou modifier la sélection de 50 jeux.
-5. Lancer **Compléter le réseau**. L’opération réutilise ce qui est déjà exploitable, convertit les profils historiques reconnus, régénère uniquement les profils insuffisants, crée les embeddings manquants puis recalcule les similarités.
-6. Utiliser **Recalculer le réseau** uniquement après une modification manuelle de la sélection ou des profils.
-7. Évaluer les cinq voisins de quelques jeux connus.
-
-## Variables du réseau
+## Variables utiles
 
 | Variable | Défaut | Rôle |
 |---|---:|---|
 | `EXPERIMENT_SIZE` | `50` | taille de la sélection initiale |
-| `USE_DRAFT_PROFILES` | `true` | autoriser les candidats dans le laboratoire |
-| `NETWORK_USABLE_THRESHOLD` | `0.45` | complétude minimale du socle comparable avant régénération |
-| `NETWORK_JOB_POLL_MS` | `500` | intervalle interne de suivi d’une régénération Qwen3 |
-| `NETWORK_GAME_TIMEOUT_MS` | `2700000` | délai maximal d’une régénération par jeu |
-| `USEFUL_SIMILARITY_THRESHOLD` | `0.55` | seuil provisoire de densité utile |
-| `AI_EMBEDDING_TIMEOUT_MS` | `120000` | délai maximal par requête d’embedding |
+| `USE_DRAFT_PROFILES` | `true` | candidats autorisés dans le laboratoire |
+| `NETWORK_USABLE_THRESHOLD` | `0.45` | complétude comparable minimale |
+| `NETWORK_JOB_POLL_MS` | `500` | fréquence de collecte de l’étape réelle |
+| `NETWORK_GAME_TIMEOUT_MS` | `2700000` | délai maximal par jeu |
+| `AI_ANALYSIS_TIMEOUT_MS` | `480000` | délai Qwen |
+| `AI_VERIFICATION_TIMEOUT_MS` | `480000` | délai de vérification |
+| `AI_EMBEDDING_TIMEOUT_MS` | `120000` | délai d’embedding |
 
-Toutes les mutations du réseau utilisent le même contrôle `ADMIN_TOKEN` que le reste de Backlog.
-
-## Tests
-
-```bash
-npm test
-npm run check
-```
-
-La livraison comprend **52 tests** couvrant les fonctions historiques, l’intégration du réseau, la conversion des profils V1, la régénération Qwen3, la création d’embeddings EmbeddingGemma, la non-promotion des candidats, la reprise idempotente, la migration SQLite additive, la normalisation de `uncertainties: []`, la validation stricte des dimensions principales et la poursuite du lot après un échec individuel.
+Toutes les mutations exigent le même `ADMIN_TOKEN` que l’administration existante.

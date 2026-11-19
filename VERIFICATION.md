@@ -1,32 +1,28 @@
-# Vérification du correctif V0.9.4.2
+# Vérification de Backlog V0.9.4.3
 
-## Contrôles automatisés
+## Résultats automatisés
 
-- syntaxe de tous les modules serveur, réseau et interface ;
-- 52 tests réussis ;
-- migration du réseau idempotente ;
-- profil candidat utilisable sans changement de son état ;
-- conversion d’un profil V1 imbriqué vers les 11 dimensions communes sans exploiter les métadonnées de source ;
-- orchestration complète : réutilisation, conversion, embedding, régénération et recalcul des paires ;
-- opération IA `network` vérifiée avec Qwen3 puis EmbeddingGemma, sans promotion de la candidate ;
-- reprise idempotente sans nouvelle version de profil ;
-- application complète et réseau sur la même base SQLite ;
-- `uncertainties: []` avec statut `documented` normalisé sans ajout de contenu ;
-- dimensions principales toujours refusées lorsqu’elles sont vides avec un statut documentaire ;
-- poursuite du traitement par lot et reconstruction du réseau après un échec individuel.
+- `npm run check` : réussi sur le serveur, les modules et l’interface.
+- `npm test` : **58 tests réussis sur 58**.
+- Migration additive et idempotente vérifiée sur bases temporaires.
+- Recherche numérique par Steam AppID exact vérifiée.
+- Points de reprise, résultats intermédiaires, durées et journal SQLite vérifiés.
+- Priorité, retrait sans suppression et relance ciblée de la file vérifiés.
+- Suspension puis reprise du même lot vérifiées.
+- Reconstruction complète vérifiée : les versions actives restent présentes et les nouvelles analyses sont candidates.
+- Classification d’une interruption Ollama en panne d’infrastructure avec suspension automatique vérifiée.
+- Scénario de 50 jeux vérifié : 50 embeddings, 1 225 paires et aucune validation manuelle jeu par jeu.
+- Protection `ADMIN_TOKEN` vérifiée.
+- Démarrage réel du serveur, `/healthz`, configuration, tableau réseau, recherche AppID et création de campagne testés sur une base SQLite temporaire.
 
-## Contrôles fonctionnels attendus
+## Compatibilité
 
-- onglets : Tableau de bord, Bibliothèque, Connaissances IA, Réseau de similarité, Erreurs, Administration IA ;
-- jeton administrateur toujours mémorisé dans l’onglet du navigateur ;
-- fiches détaillées, sources, historique, expérience et réanalyse toujours accessibles ;
-- mutations du réseau protégées par `ADMIN_TOKEN` ;
-- aucun traitement en masse au démarrage.
+Les 52 tests de V0.9.4.2 restent présents et réussissent. Les 6 tests V0.9.4.3 couvrent les nouvelles fonctions. Les migrations ne suppriment aucune table ni ligne historique.
 
-## Vérification après déploiement
+## Limite de l’environnement de validation
 
-```bash
-docker inspect backlog-test --format 'User={{.Config.User}} CapDrop={{json .HostConfig.CapDrop}} ReadOnly={{.HostConfig.ReadonlyRootfs}}'
-curl -fsS http://127.0.0.1:3000/healthz
-docker logs --tail 30 backlog-test
-```
+Le client Docker n’est pas installé dans l’environnement de construction. Le `Dockerfile` et le script shell ont été contrôlés statiquement ; le serveur Node 24 a été démarré directement avec une base temporaire.
+
+## Intégrité de livraison
+
+`MANIFEST.sha256` contient l’empreinte de chaque fichier de l’archive, hors manifeste lui-même. L’archive ZIP et son empreinte externe sont vérifiées après création.

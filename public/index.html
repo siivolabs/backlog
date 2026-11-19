@@ -9,7 +9,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div><span class="eyebrow">BACKLOG 0.9.4.2</span><h1>Connaissances IA</h1><p>Comprendre les jeux à partir de dossiers documentaires vérifiables.</p></div>
+    <div><span class="eyebrow">BACKLOG 0.9.4.3</span><h1>Connaissances IA</h1><p>Comprendre les jeux à partir de dossiers documentaires vérifiables.</p></div>
     <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
   </header>
   <nav class="tabs" aria-label="Navigation principale">
@@ -33,7 +33,7 @@
     <section id="libraryView" class="view">
       <div class="section-head"><div><span class="eyebrow">BIBLIOTHÈQUE ENRICHIE</span><h2>Jeux et profils IA</h2></div></div>
       <form class="filterbar" id="libraryFilters">
-        <label>Rechercher<input id="gameSearch" type="search" placeholder="Titre du jeu…"></label>
+        <label>Rechercher<input id="gameSearch" type="search" placeholder="Titre ou Steam AppID exact…"></label>
         <label>Profil IA<select id="aiStatusFilter"><option value="all">Tous</option><option value="ready">Profil prêt / à vérifier</option><option value="partial">Profil partiel</option><option value="insufficient">Profil insuffisant</option><option value="validated">Validé</option><option value="not_analyzed">Non analysé</option><option value="analyzing">Analyse en cours</option><option value="error">Erreur</option><option value="reanalysis_requested">Réanalyse demandée</option></select></label>
       </form>
       <p id="librarySummary" class="muted"></p><div id="gameGrid" class="game-grid"></div>
@@ -49,7 +49,7 @@
     <section id="networkView" class="view">
       <div class="section-head">
         <div><span class="eyebrow">LABORATOIRE INTÉGRÉ</span><h2>Réseau expérimental de similarité</h2><p>Réutiliser les profils existants, convertir les anciens profils exploitables et régénérer automatiquement les profils réellement insuffisants sans modifier leur cycle de validation.</p></div>
-        <div class="button-row"><button id="networkCompleteBtn" class="button secondary">Compléter le réseau</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
+        <div class="button-row"><button id="networkCompleteBtn" class="button secondary">Compléter le réseau</button><button id="networkFullBtn" class="button secondary">Reconstruire les 50 analyses</button><button id="networkPauseBtn" class="button secondary">Suspendre</button><button id="networkResumeBtn" class="button secondary">Reprendre</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
       </div>
       <div id="networkJob" class="panel network-job" hidden></div>
       <div class="network-axis-grid">
@@ -65,7 +65,7 @@
         </article>
       </div>
       <div class="panel">
-        <div class="section-head"><div><span class="eyebrow">EXPÉRIENCE ACTIVE</span><h3>Les jeux du réseau</h3><p id="networkRunCaption" class="muted">Aucun calcul récent.</p></div><div class="network-tools"><input id="networkGameFilter" type="search" placeholder="Filtrer les jeux…"><button id="networkSelectionBtn" class="button secondary">Modifier la sélection</button></div></div>
+        <div class="section-head"><div><span class="eyebrow">EXPÉRIENCE ACTIVE</span><h3>Les jeux du réseau</h3><p id="networkRunCaption" class="muted">Aucun calcul récent.</p></div><div class="network-tools"><input id="networkGameFilter" type="search" placeholder="Titre ou Steam AppID exact…"><select id="networkStatusFilter" aria-label="Filtrer le réseau"><option value="all">Tous les jeux</option><option value="profile_usable">Profil exploitable</option><option value="profile_insufficient">Profil insuffisant</option><option value="embedded">Embedding disponible</option><option value="error">Analyse en erreur</option><option value="networked">Participe au réseau</option></select><button id="networkSelectionBtn" class="button secondary">Modifier la sélection</button></div></div>
         <div id="networkGames" class="network-game-list"><div class="empty">Chargement des profils…</div></div>
       </div>
       <div class="panel"><span class="eyebrow">DIAGNOSTIC</span><h3>Dimensions les plus souvent absentes</h3><div id="networkMissingDimensions" class="network-dimensions"></div></div>
@@ -84,7 +84,7 @@
         <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
         <pre id="testResult" class="result" hidden></pre>
       </div>
-      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.4.2 conserve les preuves par caractéristique, la vérification factuelle et la réutilisation des corrections humaines sans réécrire les profils existants. Aucune table n’est supprimée. La complétion par lot ne démarre qu’après l’action explicite « Compléter le réseau ».</p></div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.4.3 conserve les preuves par caractéristique, les points de reprise, la vérification factuelle et la réutilisation des corrections humaines sans réécrire les profils existants. Aucune table n’est supprimée. Une campagne ne démarre qu’après une action explicite.</p></div>
     </section>
   </main>
 
@@ -93,7 +93,7 @@
     <form method="dialog" class="network-selection-shell">
       <button class="close" value="cancel" aria-label="Fermer">×</button>
       <span class="eyebrow">PÉRIMÈTRE EXPÉRIMENTAL</span><h2>Sélectionner les jeux</h2>
-      <input id="networkLibraryFilter" type="search" placeholder="Rechercher dans la bibliothèque…">
+      <input id="networkLibraryFilter" type="search" placeholder="Titre ou Steam AppID exact…">
       <p class="muted"><span id="networkSelectionCount">0</span> jeu(x) sélectionné(s). La cible du POC est 50.</p>
       <div id="networkLibraryGames" class="network-library-list"></div>
       <div class="button-row network-dialog-actions"><button value="cancel" class="button secondary">Annuler</button><button id="networkSaveSelectionBtn" value="default" class="button">Enregistrer la sélection</button></div>

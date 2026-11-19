@@ -1,3 +1,18 @@
+# Journal des modifications
+
+## 0.9.4.3 — supervision et reprise des campagnes
+
+- supervision par étapes réelles, journal et durées ;
+- suspension/reprise persistantes et arrêt de la requête Ollama active ;
+- reconstruction complète des 50 jeux en nouvelles versions candidates ;
+- points de reprise intermédiaires et reprise intelligente ;
+- file prioritaire, retrait sans suppression et relance ciblée ;
+- classification statistique des erreurs et suspension automatique sur panne Ollama ;
+- bilan de campagne ;
+- recherche par titre ou Steam AppID exact dans la bibliothèque et le réseau ;
+- navigation fiche/réseau avec filtres de session conservés ;
+- migrations SQLite additives.
+
 # Changelog
 
 ## 0.9.4.2 — correctif `path_repair` sur `uncertainties`

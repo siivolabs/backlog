@@ -10,7 +10,7 @@ const { SimilarityExperiment } = require('./lib/similarity-experiment');
 const { OllamaClient } = require('./lib/network-ollama');
 const { NetworkCompletionService } = require('./lib/network-completion');
 
-const VERSION = '0.9.4.2';
+const VERSION = '0.9.4.3';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);
@@ -62,6 +62,13 @@ function addGameNames(items) {
   return items.map((item)=>{ const game=database.getGame(item.to_app_id||item.appId); return {...item,game:game?{appId:game.appId,name:game.name,coverUrl:game.coverUrl}:null}; });
 }
 
+function persistentNetworkJob() {
+  if (networkJob?.status === 'running') return networkJob;
+  const state=networkCompletion.status();const run=state.run;if(!run)return networkJob;
+  const completed=run.items.filter((item)=>['completed','failed','cancelled'].includes(item.status)).length;
+  return {type:'completion',status:run.status,phase:run.status,runId:run.id,mode:run.mode,current:completed,total:run.selected_count,startedAt:run.started_at,finishedAt:run.completed_at,pauseRequested:Boolean(run.pause_requested),run,result:run.summary?{summary:run.summary,counts:run.summary.counts,network:{pairCount:run.pair_count}}:null};
+}
+
 async function api(req,res,url) {
   const method=req.method||'GET'; const pathname=url.pathname;
   if (method==='GET'&&pathname==='/healthz') return send(res,200,{status:'ok',version:VERSION,database:path.basename(databasePath)});
@@ -96,8 +103,15 @@ async function api(req,res,url) {
   match=pathname.match(/^\/api\/v09\/games\/([^/]+)\/experience$/);
   if(method==='PUT'&&match){ requireAdmin(req); const body=await readJson(req); return send(res,200,{experience:database.saveExperience(decodeURIComponent(match[1]),body)}); }
 
+  if(method==='GET'&&pathname==='/api/v09/jobs') return send(res,200,{items:database.listJobs({status:url.searchParams.get('status')||null,campaignRunId:url.searchParams.get('campaignRunId')||null,limit:url.searchParams.get('limit')||500})});
   match=pathname.match(/^\/api\/v09\/jobs\/(\d+)$/);
-  if(method==='GET'&&match){ const job=database.getJob(match[1]); return job?send(res,200,{job}):jsonError(res,404,'Tâche introuvable'); }
+  if(method==='GET'&&match){ const job=database.jobDetail(match[1]); return job?send(res,200,{job}):jsonError(res,404,'Tâche introuvable'); }
+  match=pathname.match(/^\/api\/v09\/jobs\/(\d+)\/priority$/);
+  if(method==='PATCH'&&match){requireAdmin(req);const body=await readJson(req);const job=database.setJobPriority(match[1],body.priority);return job?send(res,200,{job}):jsonError(res,404,'Tâche introuvable');}
+  match=pathname.match(/^\/api\/v09\/jobs\/(\d+)\/retry$/);
+  if(method==='POST'&&match){requireAdmin(req);const job=database.retryJob(match[1]);if(!job)return jsonError(res,404,'Tâche introuvable');aiEngine.resume();return send(res,202,{job});}
+  match=pathname.match(/^\/api\/v09\/jobs\/(\d+)$/);
+  if(method==='DELETE'&&match){requireAdmin(req);const job=database.cancelJob(match[1]);return job?send(res,200,{job}):jsonError(res,404,'Tâche introuvable');}
   match=pathname.match(/^\/api\/v09\/profiles\/(\d+)\/review$/);
   if(method==='PATCH'&&match){ requireAdmin(req); const body=await readJson(req); const profile=database.reviewProfile(match[1],body); return profile?send(res,200,{profile}):jsonError(res,404,'Version introuvable'); }
   match=pathname.match(/^\/api\/v09\/profiles\/(\d+)\/fields\/(.+)\/review$/);
@@ -105,11 +119,20 @@ async function api(req,res,url) {
   if(method==='PUT'&&pathname==='/api/v09/feedback/similarity'){ requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:database.saveSimilarityFeedback(body)}); }
 
 
-  // Réseau expérimental 0.9.4.2 : extension additive de l'application existante.
+  // Réseau expérimental 0.9.4.3 : campagnes persistantes, supervisées et reprenables.
   if(method==='GET'&&pathname==='/api/v09/network/dashboard') return send(res,200,similarityExperiment.dashboard());
-  if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000))});
-  if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:networkJob});
-  if(method==='GET'&&pathname==='/api/v09/network/completion/plan') return send(res,200,{items:networkCompletion.publicPlan()});
+  if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000),{query:url.searchParams.get('query')||'',status:url.searchParams.get('status')||'all'})});
+  if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:persistentNetworkJob()});
+  if(method==='GET'&&pathname==='/api/v09/network/campaigns') return send(res,200,{items:similarityExperiment.campaignHistory(url.searchParams.get('limit')||20)});
+  if(method==='GET'&&pathname==='/api/v09/network/completion/plan') return send(res,200,{items:networkCompletion.publicPlan({mode:url.searchParams.get('mode')||'smart'})});
+  match=pathname.match(/^\/api\/v09\/network\/campaigns\/(\d+)$/);
+  if(method==='GET'&&match){const run=similarityExperiment.completionRun(match[1]);return run?send(res,200,{run}):jsonError(res,404,'Campagne introuvable');}
+  match=pathname.match(/^\/api\/v09\/network\/campaigns\/(\d+)\/queue\/([^/]+)\/priority$/);
+  if(method==='PATCH'&&match){requireAdmin(req);const body=await readJson(req);const item=networkCompletion.prioritize(match[1],decodeURIComponent(match[2]),body.priority??100);return item?send(res,200,{item}):jsonError(res,404,'Élément introuvable');}
+  match=pathname.match(/^\/api\/v09\/network\/campaigns\/(\d+)\/queue\/([^/]+)$/);
+  if(method==='DELETE'&&match){requireAdmin(req);const item=networkCompletion.remove(match[1],decodeURIComponent(match[2]));return item?send(res,200,{item}):jsonError(res,404,'Élément introuvable');}
+  match=pathname.match(/^\/api\/v09\/network\/campaigns\/(\d+)\/retry-errors$/);
+  if(method==='POST'&&match){requireAdmin(req);return send(res,200,{retried:networkCompletion.retryErrors(match[1])});}
   match=pathname.match(/^\/api\/v09\/network\/games\/([^/]+)\/similar$/);
   if(method==='GET'&&match) return send(res,200,{appId:decodeURIComponent(match[1]),recommendations:similarityExperiment.recommendations(decodeURIComponent(match[1]),Number(url.searchParams.get('limit')||5))});
   if(method==='POST'&&pathname==='/api/v09/network/selection'){
@@ -119,7 +142,7 @@ async function api(req,res,url) {
   }
   if(method==='POST'&&pathname==='/api/v09/network/rebuild'){
     requireAdmin(req);
-    if(networkJob?.status==='running') throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
+    if(networkJob?.status==='running'||networkCompletion.running) throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
     networkJob={type:'network',status:'running',startedAt:new Date().toISOString()};
     try { const result=similarityExperiment.rebuildNetwork(); networkJob={...networkJob,status:'completed',finishedAt:new Date().toISOString(),result}; return send(res,200,result); }
     catch(error){ networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)}; throw error; }
@@ -136,18 +159,28 @@ async function api(req,res,url) {
     return send(res,202,{job:networkJob});
   }
   if(method==='POST'&&pathname==='/api/v09/network/complete'){
-    requireAdmin(req);
+    requireAdmin(req);const body=await readJson(req);const mode=body.mode==='full'?'full':'smart';
     if(networkJob?.status==='running'||networkCompletion.running) throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
-    const plan=networkCompletion.publicPlan();
-    networkJob={type:'completion',status:'running',phase:'planning',startedAt:new Date().toISOString(),current:0,total:plan.length,plan};
+    const plan=networkCompletion.publicPlan({mode});
+    networkJob={type:'completion',status:'running',phase:'planning',mode,startedAt:new Date().toISOString(),current:0,total:plan.length,plan};
     setImmediate(async()=>{
       try {
-        const result=await networkCompletion.run({onProgress:(progress)=>{networkJob={...networkJob,...progress,status:'running'};}});
+        const result=await networkCompletion.run({mode,onProgress:(progress)=>{networkJob={...networkJob,...progress,status:progress.phase==='paused'?'paused':'running'};}});
         networkJob={...networkJob,status:result.status,phase:'completed',finishedAt:new Date().toISOString(),current:result.selected,total:result.selected,result};
       } catch(error) {
         console.error(error);networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)};
       }
     });
+    return send(res,202,{job:networkJob});
+  }
+  if(method==='POST'&&pathname==='/api/v09/network/pause'){
+    requireAdmin(req);const state=networkCompletion.pause();networkJob={...persistentNetworkJob(),status:'pausing',phase:'pausing'};return send(res,202,{job:networkJob,state});
+  }
+  if(method==='POST'&&pathname==='/api/v09/network/resume'){
+    requireAdmin(req);if(networkCompletion.running)throw Object.assign(new Error('La campagne est déjà en cours'),{statusCode:409});
+    const run=similarityExperiment.latestResumableRun();if(!run)return jsonError(res,409,'Aucune campagne à reprendre');
+    networkJob={type:'completion',status:'running',phase:'resuming',mode:run.mode,runId:run.id,startedAt:run.started_at,current:run.items.filter((item)=>item.status==='completed').length,total:run.selected_count};
+    setImmediate(async()=>{try{const result=await networkCompletion.resume({onProgress:(progress)=>{networkJob={...networkJob,...progress,status:progress.phase==='paused'?'paused':'running'};}});networkJob={...networkJob,status:result.status,phase:'completed',finishedAt:new Date().toISOString(),result};}catch(error){console.error(error);networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)};}});
     return send(res,202,{job:networkJob});
   }
   if(method==='PUT'&&pathname==='/api/v09/network/feedback'){
