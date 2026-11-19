@@ -1,8 +1,8 @@
-# Backlog V0.9.4.3 — campagnes IA supervisées et reprenables
+# Backlog V0.9.4.4 — campagnes IA supervisées et reprenables
 
-Backlog V0.9.4.3 conserve l’application complète (bibliothèque, fiches, profils, sources, historique, expérience personnelle, administration et réseau de similarité) et ajoute une supervision persistante des campagnes d’analyse.
+Backlog V0.9.4.4 conserve l’application complète (bibliothèque, fiches, profils, sources, historique, expérience personnelle, administration et réseau de similarité) et ajoute une supervision persistante des campagnes d’analyse.
 
-## Fonctions V0.9.4.3
+## Fonctions V0.9.4.4
 
 ### Supervision sans pourcentage artificiel
 
@@ -22,8 +22,17 @@ Chaque étape possède un état, une durée réelle et des événements horodat�
 
 - **Suspendre** arrête la requête IA active lorsque possible et place la campagne dans un état persistant.
 - **Reprendre** repart de la dernière étape terminée.
-- Une interruption réseau ou une indisponibilité Ollama est classée `infrastructure` et suspend automatiquement la campagne au lieu de transformer tous les jeux suivants en échecs.
+- Une interruption réseau ponctuelle est classée `infrastructure` puis suivie d’un contrôle de disponibilité. La campagne ne se suspend automatiquement que si Ollama est réellement indisponible.
 - Les résultats intermédiaires déjà terminés (dossier, réponse Qwen, profil réparé, vérification, embedding) sont réutilisés.
+
+
+### Fiabilité Qwen et preuves expérimentales
+
+- Les trois appels longs à Qwen utilisent le streaming NDJSON ; chaque fragment reçu réarme le délai d’inactivité.
+- Le réseau expérimental peut conserver un profil sémantiquement exploitable tout en excluant les preuves documentaires secondaires non vérifiées.
+- Les opérations `full` et la base de connaissances continuent d’exiger la validation documentaire stricte.
+- Les statuts HTTP, corps de réponse et causes réseau restent visibles dans le diagnostic.
+- Le journal en direct reste ouvert et affiche les événements SQLite avec le nom du jeu et son AppID.
 
 ### Campagnes intelligentes ou complètes
 
@@ -40,7 +49,7 @@ La file persistante permet de :
 - relancer uniquement les erreurs ;
 - reprendre une campagne interrompue après redémarrage.
 
-Les erreurs sont classées en `infrastructure`, `technique`, `qualite`, `documentaire` ou `interruption`. Les erreurs techniques peuvent être retentées automatiquement ; les pannes d’infrastructure provoquent une suspension sûre.
+Les erreurs sont classées en `infrastructure`, `technique`, `qualite`, `documentaire` ou `interruption`. Les erreurs techniques et incidents réseau ponctuels peuvent être retentés automatiquement ; une indisponibilité Ollama confirmée provoque une suspension sûre.
 
 ### Bilan de campagne
 
@@ -63,7 +72,7 @@ La migration est uniquement additive. Elle conserve notamment :
 - les réglages `ADMIN_TOKEN`, Ollama et SearXNG ;
 - les tables du réseau V0.9.4 et de complétion V0.9.4.1.
 
-V0.9.4.3 ajoute deux tables :
+V0.9.4.4 ajoute deux tables :
 
 - `ai_analysis_checkpoints_v0943` ;
 - `ai_analysis_events_v0943`.
@@ -108,7 +117,7 @@ Après démarrage :
 curl -fsS http://127.0.0.1:3000/healthz
 ```
 
-Le résultat doit annoncer la version `0.9.4.3`.
+Le résultat doit annoncer la version `0.9.4.4`.
 
 ## Variables utiles
 
@@ -119,8 +128,10 @@ Le résultat doit annoncer la version `0.9.4.3`.
 | `NETWORK_USABLE_THRESHOLD` | `0.45` | complétude comparable minimale |
 | `NETWORK_JOB_POLL_MS` | `500` | fréquence de collecte de l’étape réelle |
 | `NETWORK_GAME_TIMEOUT_MS` | `2700000` | délai maximal par jeu |
-| `AI_ANALYSIS_TIMEOUT_MS` | `480000` | délai Qwen |
-| `AI_VERIFICATION_TIMEOUT_MS` | `480000` | délai de vérification |
+| `AI_ANALYSIS_INACTIVITY_TIMEOUT_MS` | `480000` | délai sans fragment Qwen |
+| `AI_PATH_REPAIR_INACTIVITY_TIMEOUT_MS` | `120000` | délai sans fragment de réparation |
+| `AI_VERIFICATION_INACTIVITY_TIMEOUT_MS` | `480000` | délai sans fragment de vérification |
+| `AI_OLLAMA_HEALTH_TIMEOUT_MS` | `10000` | contrôle avant suspension automatique |
 | `AI_EMBEDDING_TIMEOUT_MS` | `120000` | délai d’embedding |
 
 Toutes les mutations exigent le même `ADMIN_TOKEN` que l’administration existante.

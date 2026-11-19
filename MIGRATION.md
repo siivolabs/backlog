@@ -1,21 +1,24 @@
-# Migration vers Backlog V0.9.4.3
+# Migration vers Backlog V0.9.4.4
 
-La migration est additive et idempotente. Elle ne supprime aucune table, aucun profil, aucun dossier, aucune source, aucun embedding et aucun retour utilisateur.
+La migration depuis V0.9.4.3 est **sans changement de schéma**. Elle ne supprime ni ne réécrit aucune table, ligne, version de profil, source, embedding, similarité ou donnée utilisateur.
 
 ## Avant le déploiement
 
-Arrêter le conteneur puis sauvegarder `/srv/docker/backlog/data/backlog.sqlite`.
+1. Arrêter le conteneur.
+2. Sauvegarder le fichier SQLite monté dans `/data`.
+3. Publier les fichiers de l’archive dans le dépôt puis reconstruire l’image.
+4. Recréer le conteneur en conservant exactement le même volume `/data`.
 
-## Ajouts SQLite
+Les tables de supervision V0.9.4.3 (`ai_analysis_checkpoints_v0943` et `ai_analysis_events_v0943`) sont conservées. Les campagnes et tâches interrompues restent reprenables ; les points de reprise terminés sont réutilisés.
 
-- `ai_analysis_checkpoints_v0943` : sortie et durée de chaque étape terminée.
-- `ai_analysis_events_v0943` : journal horodaté d’une tâche.
-- Colonnes de priorité, reprise, campagne, catégorie d’erreur et durée dans `ai_analysis_jobs`.
-- Colonnes de mode, pause, résumé et statistiques dans `similarity_completion_runs_v0941`.
-- Colonnes de priorité, étape, tâche, tentatives, erreur, durées et journal dans `similarity_completion_items_v0941`.
+## Variables ajoutées
 
-Les campagnes qui étaient `running` au redémarrage deviennent `interrupted` et sont proposées à la reprise. Les profils historiques restent inchangés.
+- `AI_ANALYSIS_INACTIVITY_TIMEOUT_MS` : 480000 ms.
+- `AI_PATH_REPAIR_INACTIVITY_TIMEOUT_MS` : 120000 ms.
+- `AI_VERIFICATION_INACTIVITY_TIMEOUT_MS` : 480000 ms.
+- `AI_OLLAMA_HEALTH_TIMEOUT_MS` : 10000 ms.
+- `AI_OLLAMA_TOTAL_TIMEOUT_MS` : facultatif, désactivé par défaut ; permet d’imposer un plafond total si nécessaire.
 
 ## Retour arrière
 
-Une ancienne image peut continuer à lire les tables qu’elle connaît ; elle ignorera les tables V0.9.4.3. Restaurer la sauvegarde SQLite seulement si un retour complet des données est nécessaire.
+Une image V0.9.4.3 peut relire la même base, car V0.9.4.4 n’ajoute aucun schéma SQLite. Restaurer la sauvegarde uniquement si un retour complet de l’état applicatif est souhaité.

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { AiEngine, validateProfileContent, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths, normalizeEmptyUncertaintiesEvidence, mergeCompatibleEvidenceClaims } = require('../lib/ai-engine');
+const { AiEngine, validateProfileContent, quarantineNetworkEvidence, assessProfileContent, PROFILE_SCHEMA_VERSION, normalizeKnownEvidencePaths, normalizeEmptyUncertaintiesEvidence, mergeCompatibleEvidenceClaims } = require('../lib/ai-engine');
 
 const evidence = (status='documented', source_ids=['SOURCE-1'], note='Caractéristique établie par le dossier documentaire.', path='summary') => ({status,source_ids,confidence:status==='unknown'?'unknown':'high',note,claims:status==='unknown'?[]:[{path,source_ids,support:status==='human_corrected'?'human':'direct',confidence:'high',note:'La caractéristique est soutenue par la preuve indiquée.'}]});
 
@@ -47,6 +47,23 @@ for(const [name,profile] of Object.entries(pilots)) test(`pilote V0.9.3 valide u
   assert.notEqual(assessment.profileQuality,'insufficient');
   assert.ok(assessment.semanticScore>=65,`${name}: score sémantique ${assessment.semanticScore}`);
   assert.equal(assessment.documentCompletenessScore,90);
+});
+
+test('le réseau expérimental exclut une preuve secondaire invalide sans altérer les caractéristiques du profil',()=>{
+  const profile=structuredClone(pilots.Control);const originalNarrative=structuredClone(profile.narrative);
+  profile.field_status.narrative.claims[0].path='narrative.chemin_inexistant';
+  const result=quarantineNetworkEvidence(profile,{sourceCount:1,reason:new Error('chemin de preuve invalide')});
+  assert.deepEqual(result.profile.narrative,originalNarrative);
+  assert.equal(result.profile.field_status.narrative.claims.length,0);
+  assert.equal(result.profile.field_status.narrative.confidence,'unknown');
+  assert.ok(result.quarantined.some((item)=>item.dimension==='narrative'));
+  assert.equal(result.semantic.usable,true);
+  assert.throws(()=>validateProfileContent(profile,{sourceCount:1}),/chemin de preuve/i);
+});
+
+test('le réseau expérimental reste bloquant si les caractéristiques fondamentales sont insuffisantes',()=>{
+  const profile=structuredClone(pilots.Control);profile.summary='';profile.gameplay_loops=[];
+  assert.throws(()=>quarantineNetworkEvidence(profile,{sourceCount:1}),/caractéristiques fondamentales|schéma|liste trop courte|texte trop court/i);
 });
 
 test('Euro Truck Simulator 2 représente la faible narration comme caractéristique connue',()=>{

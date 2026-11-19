@@ -1,28 +1,26 @@
-# Vérification de Backlog V0.9.4.3
+# Vérification de Backlog V0.9.4.4
 
 ## Résultats automatisés
 
-- `npm run check` : réussi sur le serveur, les modules et l’interface.
-- `npm test` : **58 tests réussis sur 58**.
-- Migration additive et idempotente vérifiée sur bases temporaires.
-- Recherche numérique par Steam AppID exact vérifiée.
-- Points de reprise, résultats intermédiaires, durées et journal SQLite vérifiés.
-- Priorité, retrait sans suppression et relance ciblée de la file vérifiés.
-- Suspension puis reprise du même lot vérifiées.
-- Reconstruction complète vérifiée : les versions actives restent présentes et les nouvelles analyses sont candidates.
-- Classification d’une interruption Ollama en panne d’infrastructure avec suspension automatique vérifiée.
-- Scénario de 50 jeux vérifié : 50 embeddings, 1 225 paires et aucune validation manuelle jeu par jeu.
-- Protection `ADMIN_TOKEN` vérifiée.
-- Démarrage réel du serveur, `/healthz`, configuration, tableau réseau, recherche AppID et création de campagne testés sur une base SQLite temporaire.
+- `npm run check` : syntaxe validée pour le serveur, tous les modules et l’interface.
+- `npm test` : **65 tests réussis sur 65**.
+- Les 58 tests de V0.9.4.3 restent présents et réussissent.
+- Streaming Qwen NDJSON : réassemblage des fragments et délai d’inactivité réarmé vérifiés.
+- Erreurs HTTP : statut, corps, URL et cause technique conservés dans le détail vérifié.
+- Validation stricte de la base de connaissances conservée.
+- Réseau expérimental : exclusion d’une preuve secondaire invalide sans modification des caractéristiques du profil vérifiée.
+- Profil fondamentalement insuffisant : blocage maintenu.
+- Reprise du même lot et réutilisation des points de reprise SQLite vérifiées.
+- Erreur réseau ponctuelle avec Ollama disponible : la campagne continue.
+- Ollama réellement indisponible : suspension automatique sûre vérifiée.
+- Journal en direct : source SQLite, panneau ouvert et noms des jeux vérifiés.
+- Scénario historique de 50 jeux : 50 embeddings et 1 225 paires vérifié.
+- Migrations additives et conservation des profils, candidats, embeddings et similarités vérifiées sur bases temporaires.
 
-## Compatibilité
+## Limites de l’environnement
 
-Les 52 tests de V0.9.4.2 restent présents et réussissent. Les 6 tests V0.9.4.3 couvrent les nouvelles fonctions. Les migrations ne suppriment aucune table ni ligne historique.
-
-## Limite de l’environnement de validation
-
-Le client Docker n’est pas installé dans l’environnement de construction. Le `Dockerfile` et le script shell ont été contrôlés statiquement ; le serveur Node 24 a été démarré directement avec une base temporaire.
+Le client Docker n’est pas disponible dans l’environnement de construction. Le `Dockerfile` et `compose.yaml` sont contrôlés statiquement ; l’exécution et les tests utilisent Node.js 24. Aucun appel au serveur Ollama privé n’a été effectué : le protocole HTTP/NDJSON et les pannes sont testés avec des doubles déterministes.
 
 ## Intégrité de livraison
 
-`MANIFEST.sha256` contient l’empreinte de chaque fichier de l’archive, hors manifeste lui-même. L’archive ZIP et son empreinte externe sont vérifiées après création.
+`MANIFEST.sha256` contient l’empreinte SHA-256 de chaque fichier livré, hors manifeste. L’archive ZIP et son empreinte externe sont vérifiées après création.

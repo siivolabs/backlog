@@ -10,7 +10,7 @@ const { SimilarityExperiment } = require('./lib/similarity-experiment');
 const { OllamaClient } = require('./lib/network-ollama');
 const { NetworkCompletionService } = require('./lib/network-completion');
 
-const VERSION = '0.9.4.3';
+const VERSION = '0.9.4.4';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);
@@ -63,10 +63,14 @@ function addGameNames(items) {
 }
 
 function persistentNetworkJob() {
-  if (networkJob?.status === 'running') return networkJob;
   const state=networkCompletion.status();const run=state.run;if(!run)return networkJob;
+  const namedRun={...run,items:(run.items||[]).map((item)=>{const game=database.getGame(item.app_id);return{...item,game_name:game?.name||null};})};
+  const activeItem=namedRun.items.find((item)=>item.status==='running')||namedRun.items.find((item)=>item.job_id&&['pending','paused','interrupted'].includes(item.status));
+  const telemetry=activeItem?.job_id?networkCompletion.itemTelemetry(activeItem.job_id):null;
   const completed=run.items.filter((item)=>['completed','failed','cancelled'].includes(item.status)).length;
-  return {type:'completion',status:run.status,phase:run.status,runId:run.id,mode:run.mode,current:completed,total:run.selected_count,startedAt:run.started_at,finishedAt:run.completed_at,pauseRequested:Boolean(run.pause_requested),run,result:run.summary?{summary:run.summary,counts:run.summary.counts,network:{pairCount:run.pair_count}}:null};
+  const persisted={type:'completion',status:run.status,phase:run.status,runId:run.id,mode:run.mode,current:completed,total:run.selected_count,startedAt:run.started_at,finishedAt:run.completed_at,pauseRequested:Boolean(run.pause_requested),run:namedRun,telemetry,currentStep:telemetry?.job?.current_step||activeItem?.current_step||null,message:telemetry?.job?.message||activeItem?.message||null,result:run.summary?{summary:run.summary,counts:run.summary.counts,network:{pairCount:run.pair_count}}:null};
+  if(networkJob?.status==='running'||networkJob?.status==='pausing')return{...persisted,...networkJob,run:namedRun,telemetry:telemetry||networkJob.telemetry,currentStep:telemetry?.job?.current_step||networkJob.currentStep||persisted.currentStep,message:telemetry?.job?.message||networkJob.message||persisted.message};
+  return persisted;
 }
 
 async function api(req,res,url) {
@@ -119,7 +123,7 @@ async function api(req,res,url) {
   if(method==='PUT'&&pathname==='/api/v09/feedback/similarity'){ requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:database.saveSimilarityFeedback(body)}); }
 
 
-  // Réseau expérimental 0.9.4.3 : campagnes persistantes, supervisées et reprenables.
+  // Réseau expérimental 0.9.4.4 : campagnes persistantes, supervisées et reprenables.
   if(method==='GET'&&pathname==='/api/v09/network/dashboard') return send(res,200,similarityExperiment.dashboard());
   if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000),{query:url.searchParams.get('query')||'',status:url.searchParams.get('status')||'all'})});
   if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:persistentNetworkJob()});

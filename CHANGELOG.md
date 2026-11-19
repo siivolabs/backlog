@@ -1,5 +1,15 @@
 # Journal des modifications
 
+## 0.9.4.4 — streaming Qwen et tolérance documentaire bornée
+
+- génération, réparation et vérification Qwen en streaming NDJSON avec délai d’inactivité ;
+- reprise des étapes SQLite déjà terminées ;
+- quarantaine des seules preuves secondaires pour le réseau expérimental, sans relâcher la base de connaissances ;
+- suspension automatique uniquement après contrôle réel de disponibilité Ollama ;
+- conservation des causes HTTP et réseau ;
+- journal SQLite maintenu ouvert et enrichi des noms de jeux ;
+- aucune migration destructive et 65 tests de non-régression.
+
 ## 0.9.4.3 — supervision et reprise des campagnes
 
 - supervision par étapes réelles, journal et durées ;

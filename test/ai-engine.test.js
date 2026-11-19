@@ -65,7 +65,7 @@ test('Tester Ollama explique une réponse Qwen sans contenu final',async()=>{
   assert.match(result.detail,/raisonnement.*aucun contenu final/i);
 });
 
-test('l’analyse normale utilise Ollama Chat sans limite minuscule de tokens',async()=>{
+test('l’analyse normale utilise Ollama Chat en streaming sans limite minuscule de tokens',async()=>{
   const calls=[];
   const fakeFetch=async(url,options={})=>{
     calls.push({url:String(url),body:JSON.parse(options.body)});
@@ -74,13 +74,34 @@ test('l’analyse normale utilise Ollama Chat sans limite minuscule de tokens',a
   const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
   await engine.generateProfile({appId:'1',name:'Jeu de test'},[]);
   assert.equal(calls[0].url,'http://ollama:11434/api/chat');
-  assert.equal(calls[0].body.stream,false);
+  assert.equal(calls[0].body.stream,true);
   assert.equal(calls[0].body.options.temperature,0.05);
   assert.equal(calls[0].body.think,false);
   assert.equal(calls[0].body.format.properties.schema_version.enum[0],PROFILE_SCHEMA_VERSION);
   assert.equal(PROFILE_FORMAT.properties.pace.anyOf[0].type,'object');
   assert.equal('num_predict' in calls[0].body.options,false);
   assert.deepEqual(calls[0].body.messages.map((message)=>message.role),['system','user']);
+});
+
+test('le streaming Qwen réassemble les fragments NDJSON et tolère une génération longue tant que des fragments arrivent',async()=>{
+  const encoder=new TextEncoder();
+  const body={async *[Symbol.asyncIterator](){yield encoder.encode('{"message":{"content":"{\\"schema_version\\":\\"2.1\\""}}\n');await new Promise((resolve)=>setTimeout(resolve,5));yield encoder.encode('{"message":{"content":"}"},"done":true}\n');}};
+  const fakeFetch=async()=>({ok:true,status:200,statusText:'OK',body,text:async()=>''});
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434',AI_ANALYSIS_INACTIVITY_TIMEOUT_MS:'100'}});
+  const result=await engine.streamJsonRequest('http://ollama:11434/api/chat',{method:'POST',body:'{}',timeoutMs:100},'Ollama/Qwen');
+  assert.equal(result.message.content,'{"schema_version":"2.1"}');
+});
+
+test('les erreurs HTTP conservent statut, corps, URL et cause dans le détail technique',async()=>{
+  const fakeFetch=async()=>({ok:false,status:502,statusText:'Bad Gateway',text:async()=>'proxy upstream reset'});
+  const engine=new AiEngine({database:{},fetchImpl:fakeFetch,env:{OLLAMA_BASE_URL:'http://ollama:11434'}});
+  await assert.rejects(()=>engine.jsonRequest('http://ollama:11434/api/tags',{},'Ollama'),(error)=>{
+    const detail=formatAnalysisError(error,'analysis');
+    assert.match(detail,/Statut HTTP : 502 Bad Gateway/);
+    assert.match(detail,/proxy upstream reset/);
+    assert.match(detail,/http:\/\/ollama:11434\/api\/tags/);
+    return true;
+  });
 });
 
 test('la seconde passe vérifie factuellement le profil avec un schéma strict',async()=>{
