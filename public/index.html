@@ -1,161 +1,62 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Backlog · Connaissances IA</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#091525"><title>Backlog Core</title>
   <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
-  <script src="/discovery.js" defer></script>
 </head>
 <body>
-  <header class="topbar">
-    <div><span class="eyebrow">BACKLOG 0.9.7</span><h1>Connaissances IA</h1><p>Comprendre les jeux et découvrir les expériences qui peuvent vous toucher.</p></div>
-    <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
-  </header>
-  <nav class="tabs" aria-label="Navigation principale">
-    <button class="tab active" data-view="dashboard">Tableau de bord</button>
-    <button class="tab" data-view="library">Bibliothèque</button>
-    <button class="tab" data-view="knowledge">Connaissances IA</button>
-    <button class="tab" data-view="network">Réseau de similarité</button>
-    <button class="tab" data-view="discovery">Découverte</button>
-    <button class="tab" data-view="errors">Erreurs</button>
-    <button class="tab" data-view="admin">Administration IA</button>
-  </nav>
-  <main>
-    <section id="dashboardView" class="view active">
-      <div class="section-head"><div><span class="eyebrow">COUVERTURE & QUALITÉ</span><h2>Tableau de bord IA</h2></div><button id="refreshDashboard" class="button secondary">Actualiser</button></div>
-      <div id="metricGrid" class="metric-grid" aria-live="polite"></div>
-      <div class="panel split-panel">
-        <div><span class="eyebrow">PROCHAINE ÉTAPE</span><h3>Réviser avant d’étendre</h3><p>Les profils générés restent distincts des connaissances validées. Commencez par les jeux que vous connaissez bien.</p></div>
-        <div class="button-row"><button class="button" data-go="knowledge">Réviser les profils</button><button class="button secondary" data-go="errors">Examiner les erreurs</button></div>
-      </div>
-    </section>
-
-    <section id="libraryView" class="view">
-      <div class="section-head"><div><span class="eyebrow">BIBLIOTHÈQUE ENRICHIE</span><h2>Jeux et profils IA</h2></div></div>
-      <form class="filterbar" id="libraryFilters">
-        <label>Rechercher<input id="gameSearch" type="search" placeholder="Titre ou Steam AppID exact…"></label>
-        <label>Profil IA<select id="aiStatusFilter"><option value="all">Tous</option><option value="ready">Profil prêt / à vérifier</option><option value="partial">Profil partiel</option><option value="insufficient">Profil insuffisant</option><option value="validated">Validé</option><option value="not_analyzed">Non analysé</option><option value="analyzing">Analyse en cours</option><option value="error">Erreur</option><option value="reanalysis_requested">Réanalyse demandée</option></select></label>
-      </form>
-      <p id="librarySummary" class="muted"></p><div id="gameGrid" class="game-grid"></div>
-      <div class="button-row pagination"><button id="previousPage" class="button secondary">Page précédente</button><button id="nextPage" class="button secondary">Page suivante</button></div>
-    </section>
-
-    <section id="knowledgeView" class="view">
-      <div class="section-head"><div><span class="eyebrow">FILE DE RÉVISION</span><h2>Base de connaissances</h2><p>Consultez la provenance et validez explicitement les analyses.</p></div></div>
-      <div id="knowledgeTable" class="table-wrap"></div>
-    </section>
-
-
-    <section id="networkView" class="view">
-      <div class="section-head">
-        <div><span class="eyebrow">LABORATOIRE INTÉGRÉ</span><h2>Réseau expérimental de similarité</h2><p>Réutiliser les profils existants, convertir les anciens profils exploitables et régénérer automatiquement les profils réellement insuffisants sans modifier leur cycle de validation.</p></div>
-        <div class="button-row"><button id="networkCompleteBtn" class="button secondary">Compléter le réseau</button><button id="networkFullBtn" class="button secondary">Reconstruire les 50 analyses</button><button id="networkPauseBtn" class="button secondary">Suspendre</button><button id="networkResumeBtn" class="button secondary">Reprendre</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
-      </div>
-      <div id="networkJob" class="panel network-job" hidden></div>
-      <article id="fastSemanticPanel" class="panel">
-        <div class="section-head">
-          <div><span class="eyebrow">NOUVEAU · PIPELINE SÉMANTIQUE RAPIDE</span><h3>Réseau compact indépendant</h3><p>Extrait uniquement les caractéristiques discriminantes des dossiers existants, crée des embeddings séparés et ne modifie aucun profil historique.</p></div>
-          <div class="button-row"><button id="fastSemanticRunBtn" class="button">Lancer le mode rapide</button><button id="fastSemanticRebuildBtn" class="button secondary">Forcer la reconstruction</button><button id="fastSemanticPauseBtn" class="button secondary">Suspendre</button><button id="fastSemanticResumeBtn" class="button secondary">Reprendre</button></div>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#library" aria-label="Backlog Core"><span class="brand-mark">B</span><span><strong>Backlog</strong><small>CORE · V1.0</small></span></a>
+      <nav aria-label="Navigation principale">
+        <button class="nav active" data-view="library"><span>01</span> Bibliothèque</button>
+        <button class="nav" data-view="enrichment"><span>02</span> Enrichissement</button>
+        <button class="nav" data-view="discovery"><span>03</span> Découverte</button>
+      </nav>
+      <button id="diagnosticsBtn" class="icon-btn" title="État du système" aria-label="État du système">●</button>
+    </header>
+    <main>
+      <section id="library" class="view active">
+        <div class="hero">
+          <div><p class="eyebrow">VOTRE INVENTAIRE · VOTRE MÉMOIRE</p><h1>La bibliothèque,<br><em>sans le bruit.</em></h1><p>Votre véritable inventaire Steam est importé depuis l'installation précédente. Les anciennes connaissances IA restent volontairement à l'écart.</p></div>
+          <div class="stats-panel">
+            <div><strong id="inventoryCount">—</strong><span>jeux inventoriés</span></div><div><strong id="analyzedCount">—</strong><span>profils neufs</span></div><div><strong id="selectedCount">—</strong><span>dans le lot</span></div>
+          </div>
         </div>
-        <div class="network-metrics"><div><strong id="fastCompletedMetric">0</strong><small>profils prêts</small></div><div><strong id="fastEmbeddedMetric">0</strong><small>embeddings</small></div><div><strong id="fastPairsMetric">0</strong><small>relations</small></div><div><strong id="fastDurationMetric">—</strong><small>durée totale</small></div></div>
-        <div class="network-progress"><i id="fastProgressBar"></i></div>
-        <p id="fastSemanticCaption" class="muted">Aucune campagne rapide exécutée.</p>
-        <div id="fastSemanticJob" class="campaign-log" hidden></div>
-      </article>
-      <div class="network-axis-grid">
-        <article class="network-axis-card">
-          <div class="network-axis-title"><span>→</span><div><small>AXE HORIZONTAL</small><h3>Couverture</h3></div></div>
-          <div class="network-metrics"><div><strong id="networkSelectedMetric">—</strong><small>sélectionnés</small></div><div><strong id="networkProfiledMetric">—</strong><small>avec profil</small></div><div><strong id="networkEmbeddedMetric">—</strong><small>avec embedding</small></div><div><strong id="networkPairsMetric">—</strong><small>paires calculées</small></div></div>
-          <div class="network-progress"><i id="networkCoverageBar"></i></div><p id="networkCoverageCaption" class="muted">Chargement…</p>
-        </article>
-        <article class="network-axis-card">
-          <div class="network-axis-title"><span>↑</span><div><small>AXE VERTICAL</small><h3>Qualité</h3></div></div>
-          <div class="network-metrics"><div><strong id="networkMedianMetric">—</strong><small>complétude médiane</small></div><div><strong id="networkUsableMetric">—</strong><small>exploitables</small></div><div><strong id="networkDensityMetric">—</strong><small>densité utile</small></div><div><strong id="networkEvaluatedMetric">—</strong><small>avis enregistrés</small></div></div>
-          <div class="network-levels"><span class="a">A <b id="networkLevelA">0</b></span><span class="b">B <b id="networkLevelB">0</b></span><span class="c">C <b id="networkLevelC">0</b></span></div>
-        </article>
-      </div>
-      <div class="panel">
-        <div class="section-head"><div><span class="eyebrow">EXPÉRIENCE ACTIVE</span><h3>Les jeux du réseau</h3><p id="networkRunCaption" class="muted">Aucun calcul récent.</p></div><div class="network-tools"><input id="networkGameFilter" type="search" placeholder="Titre ou Steam AppID exact…"><select id="networkStatusFilter" aria-label="Filtrer le réseau"><option value="all">Tous les jeux</option><option value="profile_usable">Profil exploitable</option><option value="profile_insufficient">Profil insuffisant</option><option value="embedded">Embedding disponible</option><option value="error">Analyse en erreur</option><option value="networked">Participe au réseau</option></select><button id="networkSelectionBtn" class="button secondary">Modifier la sélection</button></div></div>
-        <div id="networkGames" class="network-game-list"><div class="empty">Chargement des profils…</div></div>
-      </div>
-      <div class="panel"><span class="eyebrow">DIAGNOSTIC</span><h3>Dimensions les plus souvent absentes</h3><div id="networkMissingDimensions" class="network-dimensions"></div></div>
-    </section>
-
-    <section id="discoveryView" class="view">
-      <div class="section-head">
-        <div><span class="eyebrow">APPRENTISSAGE CONTEXTUEL · V0.9.7</span><h2>Backlog Discovery</h2><p>Partez d’un jeu apprécié, explicitez ce qui compte pour vous, puis découvrez jusqu’à cinq œuvres. Vos corrections sont réutilisées sans être généralisées aux autres jeux.</p></div>
-        <div id="discoveryMetrics" class="discovery-metrics" aria-live="polite"></div>
-      </div>
-      <ol class="discovery-steps" aria-label="Parcours de découverte">
-        <li class="active"><b>1</b><span>Pourquoi ce jeu ?</span></li>
-        <li><b>2</b><span>Combiner les intentions</span></li>
-        <li><b>3</b><span>Découvrir des jeux</span></li>
-      </ol>
-
-      <article class="panel discovery-stage" id="discoveryStageOne">
-        <span class="eyebrow">ÉTAPE 1</span><h3>Choisir un jeu apprécié</h3>
-        <div class="discovery-game-picker">
-          <label>Rechercher dans la bibliothèque<input id="discoveryGameSearch" type="search" autocomplete="off" placeholder="Titre ou Steam AppID exact…"></label>
-          <div id="discoveryGameResults" class="discovery-game-results" hidden></div>
-          <div id="discoverySelectedGame" class="discovery-selected-game"><p class="muted">Aucun jeu sélectionné.</p></div>
+        <div id="importAlert" class="notice hidden"></div>
+        <div class="toolbar">
+          <label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Rechercher un titre, un studio, un genre…" autocomplete="off"></label>
+          <div class="segmented"><button data-filter="all" class="active">Tous</button><button data-filter="inventoried">Inventoriés</button><button data-filter="analyzed">Analysés</button><button data-filter="selected">Lot</button></div>
         </div>
-        <label>Pourquoi aimez-vous ce jeu ?<textarea id="discoveryReason" rows="6" maxlength="6000" placeholder="Décrivez librement ce que cette expérience vous fait vivre, ce que vous cherchez à comprendre, ressentir, explorer ou éprouver…"></textarea></label>
-        <div class="button-row"><button id="discoveryInterpretBtn" class="button" disabled>Interpréter mes motivations</button></div>
-        <div id="discoveryInterpretation" hidden></div>
-      </article>
+        <div class="section-head"><div><p class="eyebrow">MANIFESTE</p><h2 id="libraryTitle">Tous les jeux</h2></div><span id="resultCount" class="pill">—</span></div>
+        <div id="gameGrid" class="game-grid" aria-live="polite"></div>
+        <button id="loadMore" class="secondary hidden">Afficher plus</button>
+      </section>
 
-      <article class="panel discovery-stage" id="discoveryStageTwo">
-        <span class="eyebrow">ÉTAPE 2</span><h3>Explorer et combiner les intentions</h3>
-        <p>Choisissez une ou plusieurs motivations confirmées. Elles restent contextuelles et ne constituent pas un profil psychologique figé.</p>
-        <div id="discoveryIntentions" class="discovery-intentions"><div class="empty">Aucune intention confirmée pour le moment.</div></div>
-        <label>Ce que je recherche aujourd’hui (facultatif)<textarea id="discoveryQuery" rows="3" maxlength="2000" placeholder="Ajoutez une nuance, une humeur ou un type de différence que vous souhaitez explorer…"></textarea></label>
-        <div class="button-row"><button id="discoveryRunBtn" class="button" disabled>Découvrir des jeux</button></div>
-      </article>
+      <section id="enrichment" class="view">
+        <div class="hero compact"><div><p class="eyebrow">AXE HORIZONTAL × AXE VERTICAL</p><h1>Comprendre<br><em>les expériences.</em></h1><p>Un lot de 50 jeux maximum, un seul pipeline visible, un profil homogène par jeu.</p></div><div class="batch-meter"><div class="ring"><strong id="batchCount">0</strong><span>/ 50</span></div><p>jeux sélectionnés</p></div></div>
+        <div class="two-col">
+          <div class="panel"><div class="panel-head"><div><p class="eyebrow">LOT DE TRAVAIL</p><h2>Jeux à enrichir</h2></div><button id="clearBatch" class="text-btn">Vider</button></div><div id="batchList" class="batch-list"></div></div>
+          <div class="panel pipeline"><p class="eyebrow">PIPELINE UNIQUE</p><h2>Collecter → Analyser → Représenter</h2><p class="muted">Les faits officiels sont collectés à nouveau. Aucun profil, embedding ou réseau historique n'est importé.</p><div id="runSummary" class="run-summary empty-state">Aucun enrichissement lancé.</div><div class="actions"><button id="startRun" class="primary">Enrichir la sélection</button><button id="pauseRun" class="secondary hidden">Suspendre</button><button id="resumeRun" class="secondary hidden">Reprendre</button></div></div>
+        </div>
+        <div id="profileInspector" class="panel hidden"></div>
+      </section>
 
-      <article class="discovery-stage" id="discoveryStageThree" hidden>
-        <div class="section-head"><div><span class="eyebrow">ÉTAPE 3</span><h3>Résonances expérientielles étayées</h3><p id="discoveryRunSummary" class="muted"></p></div></div>
-        <div id="discoveryRecommendations" class="discovery-recommendations"></div>
-      </article>
-    </section>
-
-    <section id="errorsView" class="view">
-      <div class="section-head"><div><span class="eyebrow">DIAGNOSTIC</span><h2>Analyses en erreur</h2></div><button id="refreshErrors" class="button secondary">Actualiser</button></div>
-      <div id="errorList" class="error-list"></div>
-    </section>
-
-    <section id="adminView" class="view">
-      <div class="section-head"><div><span class="eyebrow">OUTILS SECONDAIRES</span><h2>Administration IA</h2><p>Le lancement des analyses n’occupe plus l’espace principal.</p></div></div>
-      <div class="panel form-grid">
-        <label>Jeton administrateur<input id="adminToken" type="password" autocomplete="off" placeholder="Non requis si ADMIN_TOKEN est vide"></label>
-        <div><span class="label">Configuration</span><p id="engineDetails" class="muted">Chargement…</p></div>
-        <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
-        <pre id="testResult" class="result" hidden></pre>
-      </div>
-      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.7 conserve les preuves par caractéristique, les points de reprise, la vérification factuelle, le pipeline rapide, les réseaux et les six tables Discovery V0.9.6. Quatre tables V0.9.7 additives mémorisent les associations, leur portée et leur réutilisation. Aucune table n’est supprimée et aucune connaissance validée n’est réécrite.</p></div>
-    </section>
-  </main>
-
-
-  <dialog id="networkSelectionDialog">
-    <form method="dialog" class="network-selection-shell">
-      <button class="close" value="cancel" aria-label="Fermer">×</button>
-      <span class="eyebrow">PÉRIMÈTRE EXPÉRIMENTAL</span><h2>Sélectionner les jeux</h2>
-      <input id="networkLibraryFilter" type="search" placeholder="Titre ou Steam AppID exact…">
-      <p class="muted"><span id="networkSelectionCount">0</span> jeu(x) sélectionné(s). La cible du POC est 50.</p>
-      <div id="networkLibraryGames" class="network-library-list"></div>
-      <div class="button-row network-dialog-actions"><button value="cancel" class="button secondary">Annuler</button><button id="networkSaveSelectionBtn" value="default" class="button">Enregistrer la sélection</button></div>
-    </form>
-  </dialog>
-  <dialog id="gameDialog">
-    <div class="dialog-shell">
-      <button class="close" id="closeDialog" aria-label="Fermer">×</button>
-      <div id="dialogHero" class="dialog-hero"></div>
-      <nav class="subtabs" aria-label="Fiche du jeu"><button class="subtab active" data-panel="overview">Vue générale</button><button class="subtab" data-panel="profile">Profil IA</button><button class="subtab" data-panel="sources">Sources</button><button class="subtab" data-panel="similarities">Similarités</button><button class="subtab" data-panel="experience">Mon expérience</button><button class="subtab" data-panel="history">Historique</button></nav>
-      <div id="dialogBody" class="dialog-body"></div>
-    </div>
-  </dialog>
-  <div id="toast" role="status" aria-live="polite"></div>
+      <section id="discovery" class="view">
+        <div class="hero compact"><div><p class="eyebrow">INTENTIONS × RÉSONANCES</p><h1>Pourquoi ce jeu<br><em>vous touche-t-il ?</em></h1><p>Choisissez une œuvre analysée, exprimez ce que vous y recherchez, puis laissez Backlog trouver les échos les plus justes.</p></div></div>
+        <div class="discovery-flow">
+          <div class="step"><span class="step-no">01</span><div><label for="referenceSelect">Jeu de référence</label><select id="referenceSelect"><option value="">Choisir un jeu analysé…</option></select></div></div>
+          <div class="step"><span class="step-no">02</span><div><label for="motivationInput">Ce que vous aimez, ce que vous recherchez</label><textarea id="motivationInput" rows="5" placeholder="Ex. J'aime la sensation de maîtriser progressivement un système complexe, sans pression constante…"></textarea></div></div>
+          <button id="discoverBtn" class="primary wide">Trouver les résonances</button>
+        </div>
+        <div id="discoveryResults" class="recommendations"></div>
+      </section>
+    </main>
+  </div>
+  <dialog id="gameDialog"><button class="dialog-close" aria-label="Fermer">×</button><div id="gameDialogBody"></div></dialog>
+  <dialog id="diagnosticsDialog"><button class="dialog-close" aria-label="Fermer">×</button><div id="diagnosticsBody"></div></dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/app.js" defer></script>
 </body>
 </html>

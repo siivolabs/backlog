@@ -1,24 +1,21 @@
-# Migration vers Backlog V0.9.7
+# Politique de migration
 
-La migration depuis V0.9.6 est **additive, idempotente et non destructive**. Les six tables Discovery V0.9.6 et toutes les données antérieures sont conservées.
+## Importé depuis l'ancienne base
 
-## Avant le déploiement
+- identifiant Steam / AppID ;
+- titre ;
+- studio ou développeur lorsque disponible ;
+- genres et catégories d'identification ;
+- URL de couverture ;
+- temps de jeu et dernière utilisation lorsque disponibles ;
 
-1. Arrêter le conteneur.
-2. Sauvegarder le fichier SQLite monté dans `/data`.
-3. Publier le contenu de l’archive puis reconstruire l’image.
-4. Recréer le conteneur en conservant le même volume `/data`.
-5. Vérifier que `/healthz` annonce `0.9.7`.
+L'importeur inspecte dynamiquement les tables et colonnes. Il privilégie `games`, `steam_games`, `library`, `game_library`, `backlog_games`, `apps` et `owned_games`, mais accepte une autre table si elle possède un identifiant Steam et un titre.
 
-## Schéma ajouté
+## Délibérément non importé
 
-- `discovery_run_context_v097` : mode `initial`, `refine` ou `explore`, run parent, exclusions et volume de mémoire relu ;
-- `discovery_recommendation_intentions_v097` : état, confiance, justification et éléments connus pour chaque motivation ;
-- `discovery_feedback_memory_v097` : familiarité, évaluations explicites et compteurs de réutilisation ;
-- `discovery_game_intention_memory_v097` : association exacte validée, rejetée ou incertaine entre un jeu et une intention.
+Les tables et champs relatifs aux dossiers documentaires, profils IA historiques, embeddings, similarités, campagnes, réseaux, évaluations et retours antérieurs ne sont jamais lus par l'importeur.
+Les descriptions libres et les blocs JSON historiques sont également ignorés, car leur provenance pourrait être hétérogène. Les faits descriptifs sont recollectés depuis Steam lors du nouvel enrichissement.
 
-Les commentaires V0.9.6 existants sont relus directement depuis `discovery_feedback_v096`, même s’ils précèdent ces nouvelles tables. Ils restent attachés à leur AppID et aux intentions de la recommandation source.
+## Idempotence
 
-## Retour arrière
-
-Une image V0.9.6 peut relire la même base : elle ignore les quatre tables V0.9.7 et continue d’utiliser ses six tables. Les recherches créées par la V0.9.7 restent visibles dans les tables V0.9.6, tandis que les évaluations indépendantes et la mémoire ne sont simplement pas exploitées par l’ancienne image.
+Au premier démarrage, l'import automatique ne s'exécute que si `games` est vide dans `backlog-core.sqlite`. Une réimportation manuelle de l'inventaire met à jour les métadonnées d'identification sans toucher aux profils Core déjà produits.

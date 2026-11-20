@@ -1,19 +1,15 @@
-FROM node:24-alpine
-
-ENV NODE_ENV=production \
-    PORT=3000 \
-    DATA_DIR=/data
-
+FROM node:24-bookworm-slim
+LABEL org.opencontainers.image.title="Backlog Core" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.description="Bibliothèque Steam, enrichissement homogène et découverte expérientielle"
 WORKDIR /app
-COPY --chown=node:node package.json server.js ./
-COPY --chown=node:node lib ./lib
-COPY --chown=node:node public ./public
-RUN mkdir -p /data && chown node:node /data
-
+COPY package.json ./
+COPY server.js ./
+COPY lib ./lib
+COPY public ./public
+RUN mkdir -p /data && chown -R node:node /app /data
 USER node
+ENV NODE_ENV=production PORT=3000 CORE_DB_PATH=/data/backlog-core.sqlite LEGACY_DB_PATH=/data/backlog.sqlite
 EXPOSE 3000
-VOLUME ["/data"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1
-
-CMD ["node", "server.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+CMD ["node","server.js"]

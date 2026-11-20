@@ -1,15 +1,13 @@
 {
-  "name": "backlog",
-  "version": "0.9.7",
+  "name": "backlog-core",
+  "version": "1.0.0",
   "private": true,
-  "description": "Backlog complet avec base de connaissances IA et réseau expérimental de similarité intégré",
+  "description": "Backlog Core — bibliothèque Steam, enrichissement homogène et découverte expérientielle",
   "type": "commonjs",
-  "engines": {
-    "node": ">=24.0.0"
-  },
+  "engines": { "node": ">=22.5.0" },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test --test-reporter=spec",
-    "check": "node --check server.js && node --check lib/database.js && node --check lib/ai-engine.js && node --check lib/similarity-experiment.js && node --check lib/network-profile.js && node --check lib/network.js && node --check lib/network-ollama.js && node --check lib/network-completion.js && node --check lib/fast-semantic.js && node --check lib/discovery.js && node --check lib/error-classifier.js && node --check public/app.js && node --check public/discovery.js"
+    "test": "node --test test/*.test.js",
+    "check": "node --check server.js && node --check lib/database.js && node --check lib/enrichment.js && node --check lib/legacy-import.js && node --check public/app.js"
   }
 }
