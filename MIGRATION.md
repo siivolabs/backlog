@@ -1,38 +1,24 @@
-# Migration vers Backlog V0.9.6
+# Migration vers Backlog V0.9.7
 
-La migration depuis V0.9.5.0 est **additive, isolée et non destructive**. Elle ne supprime ni ne réécrit aucune version de profil, preuve, dossier, embedding, similarité, campagne, expérience ou retour existant.
+La migration depuis V0.9.6 est **additive, idempotente et non destructive**. Les six tables Discovery V0.9.6 et toutes les données antérieures sont conservées.
 
 ## Avant le déploiement
 
 1. Arrêter le conteneur.
 2. Sauvegarder le fichier SQLite monté dans `/data`.
-3. Publier le contenu de l’archive dans le dépôt puis reconstruire l’image.
-4. Recréer le conteneur en conservant exactement le même volume `/data`.
-5. Vérifier `/healthz` : la réponse doit annoncer `0.9.6`.
-6. Ouvrir l’onglet **Découverte** et exécuter un premier parcours contrôlé.
+3. Publier le contenu de l’archive puis reconstruire l’image.
+4. Recréer le conteneur en conservant le même volume `/data`.
+5. Vérifier que `/healthz` annonce `0.9.7`.
 
 ## Schéma ajouté
 
-Au premier démarrage, Backlog crée de façon idempotente :
+- `discovery_run_context_v097` : mode `initial`, `refine` ou `explore`, run parent, exclusions et volume de mémoire relu ;
+- `discovery_recommendation_intentions_v097` : état, confiance, justification et éléments connus pour chaque motivation ;
+- `discovery_feedback_memory_v097` : familiarité, évaluations explicites et compteurs de réutilisation ;
+- `discovery_game_intention_memory_v097` : association exacte validée, rejetée ou incertaine entre un jeu et une intention.
 
-- `discovery_interpretations_v096` : explication libre et interprétation encore modifiable ;
-- `discovery_intentions_v096` : motivations explicitement confirmées ;
-- `discovery_runs_v096` : exécutions, modèles, durées et erreurs ;
-- `discovery_candidates_v096` : présélection hybride, scores et périmètre approfondi ;
-- `discovery_recommendations_v096` : cinq recommandations, arguments, différences et incertitudes ;
-- `discovery_feedback_v096` : retours qualitatifs et cible de correction.
-
-Ces tables sont séparées des tables `ai_*`, `similarity_*`, `network_*` et `fast_semantic_*`. La V0.9.6 lit les métadonnées et embeddings existants mais ne les modifie pas.
-
-## Variables ajoutées
-
-- `DISCOVERY_LIBRARY_LIMIT` : 5000 jeux inspectés au maximum.
-- `DISCOVERY_CANDIDATE_LIMIT` : 40 candidats conservés.
-- `DISCOVERY_DEEP_CANDIDATES` : 12 candidats analysés par Qwen.
-- `DISCOVERY_INTERPRET_MAX_TOKENS` : 1600.
-- `DISCOVERY_ANALYSIS_MAX_TOKENS` : 3600.
-- `DISCOVERY_INACTIVITY_TIMEOUT_MS` : 240000 ms.
+Les commentaires V0.9.6 existants sont relus directement depuis `discovery_feedback_v096`, même s’ils précèdent ces nouvelles tables. Ils restent attachés à leur AppID et aux intentions de la recommandation source.
 
 ## Retour arrière
 
-Une image V0.9.5.0 peut relire la même base : elle ignore les six tables `discovery_*_v096`. Les données Discovery restent alors inutilisées. Ne restaurez la sauvegarde que si vous souhaitez également retirer les résultats expérimentaux créés après la migration.
+Une image V0.9.6 peut relire la même base : elle ignore les quatre tables V0.9.7 et continue d’utiliser ses six tables. Les recherches créées par la V0.9.7 restent visibles dans les tables V0.9.6, tandis que les évaluations indépendantes et la mémoire ne sont simplement pas exploitées par l’ancienne image.

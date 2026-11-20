@@ -1,4 +1,14 @@
-# Journal des modifications
+# Changelog
+
+## 0.9.7 — apprentissage et renouvellement des découvertes
+
+- mémoire des retours relue par les recherches suivantes ;
+- associations jeu–motivation explicites et strictement locales ;
+- évaluations indépendantes `satisfied`, `unsatisfied` et `uncertain` ;
+- recommandations non forcées, de zéro à cinq ;
+- actions d’affinage et d’exploration qui renouvellent les candidats ;
+- quatre tables additives, sans modification des données V0.9.6 ;
+- aucun appel IA supplémentaire et profondeur par défaut maintenue à 12 candidats.
 
 ## 0.9.6 — découverte expérientielle
 

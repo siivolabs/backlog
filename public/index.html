@@ -10,7 +10,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div><span class="eyebrow">BACKLOG 0.9.6</span><h1>Connaissances IA</h1><p>Comprendre les jeux et découvrir les expériences qui peuvent vous toucher.</p></div>
+    <div><span class="eyebrow">BACKLOG 0.9.7</span><h1>Connaissances IA</h1><p>Comprendre les jeux et découvrir les expériences qui peuvent vous toucher.</p></div>
     <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
   </header>
   <nav class="tabs" aria-label="Navigation principale">
@@ -85,13 +85,13 @@
 
     <section id="discoveryView" class="view">
       <div class="section-head">
-        <div><span class="eyebrow">PROTOTYPE ISOLÉ · V0.9.6</span><h2>Backlog Discovery</h2><p>Partez d’un jeu apprécié, explicitez ce qui compte pour vous, puis découvrez cinq œuvres capables d’y répondre par des moyens parfois très différents.</p></div>
+        <div><span class="eyebrow">APPRENTISSAGE CONTEXTUEL · V0.9.7</span><h2>Backlog Discovery</h2><p>Partez d’un jeu apprécié, explicitez ce qui compte pour vous, puis découvrez jusqu’à cinq œuvres. Vos corrections sont réutilisées sans être généralisées aux autres jeux.</p></div>
         <div id="discoveryMetrics" class="discovery-metrics" aria-live="polite"></div>
       </div>
       <ol class="discovery-steps" aria-label="Parcours de découverte">
         <li class="active"><b>1</b><span>Pourquoi ce jeu ?</span></li>
         <li><b>2</b><span>Combiner les intentions</span></li>
-        <li><b>3</b><span>Découvrir cinq jeux</span></li>
+        <li><b>3</b><span>Découvrir des jeux</span></li>
       </ol>
 
       <article class="panel discovery-stage" id="discoveryStageOne">
@@ -111,11 +111,11 @@
         <p>Choisissez une ou plusieurs motivations confirmées. Elles restent contextuelles et ne constituent pas un profil psychologique figé.</p>
         <div id="discoveryIntentions" class="discovery-intentions"><div class="empty">Aucune intention confirmée pour le moment.</div></div>
         <label>Ce que je recherche aujourd’hui (facultatif)<textarea id="discoveryQuery" rows="3" maxlength="2000" placeholder="Ajoutez une nuance, une humeur ou un type de différence que vous souhaitez explorer…"></textarea></label>
-        <div class="button-row"><button id="discoveryRunBtn" class="button" disabled>Découvrir cinq jeux</button></div>
+        <div class="button-row"><button id="discoveryRunBtn" class="button" disabled>Découvrir des jeux</button></div>
       </article>
 
       <article class="discovery-stage" id="discoveryStageThree" hidden>
-        <div class="section-head"><div><span class="eyebrow">ÉTAPE 3</span><h3>Cinq résonances expérientielles</h3><p id="discoveryRunSummary" class="muted"></p></div></div>
+        <div class="section-head"><div><span class="eyebrow">ÉTAPE 3</span><h3>Résonances expérientielles étayées</h3><p id="discoveryRunSummary" class="muted"></p></div></div>
         <div id="discoveryRecommendations" class="discovery-recommendations"></div>
       </article>
     </section>
@@ -133,7 +133,7 @@
         <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
         <pre id="testResult" class="result" hidden></pre>
       </div>
-      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.6 conserve les preuves par caractéristique, les points de reprise, la vérification factuelle, le pipeline rapide et tous les réseaux existants. Backlog Discovery utilise six tables séparées. Aucune table n’est supprimée et aucune connaissance validée n’est réécrite.</p></div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.7 conserve les preuves par caractéristique, les points de reprise, la vérification factuelle, le pipeline rapide, les réseaux et les six tables Discovery V0.9.6. Quatre tables V0.9.7 additives mémorisent les associations, leur portée et leur réutilisation. Aucune table n’est supprimée et aucune connaissance validée n’est réécrite.</p></div>
     </section>
   </main>
 

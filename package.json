@@ -1,6 +1,6 @@
 {
   "name": "backlog",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "private": true,
   "description": "Backlog complet avec base de connaissances IA et réseau expérimental de similarité intégré",
   "type": "commonjs",

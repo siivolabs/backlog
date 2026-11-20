@@ -65,6 +65,8 @@ test('Backlog Discovery confirme les motivations, analyse seulement les candidat
     assert.equal(setup.database.db.prepare('SELECT COUNT(*) AS count FROM ai_profile_versions').get().count, historicalProfiles, 'les profils existants ne sont jamais modifiés');
     assert.equal(new Set(run.recommendations.map((item) => item.app_id)).size, 5);
     assert.ok(run.recommendations.every((item) => item.uncertainties.length && item.difference_text));
+    assert.ok(run.recommendations.every((item) => item.intentionEvaluations.length === 2));
+    assert.ok(run.recommendations.every((item) => item.intentionEvaluations.some((evaluation) => evaluation.status === 'satisfied')));
 
     const feedback = setup.service.saveFeedback({ runId:run.id, appId:run.recommendations[0].app_id, verdict:'reason_wrong', correctionTarget:'match', comment:'Le jeu est intéressant, mais le lien causal est à reformuler.' });
     assert.equal(feedback.verdict, 'reason_wrong');
@@ -81,6 +83,66 @@ test('la migration Discovery est additive et idempotente', () => {
     setup.service.migrate(); setup.service.migrate();
     const tables = setup.service.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'discovery_%_v096' ORDER BY name").all().map((row) => row.name);
     assert.equal(tables.length, 6);
+    const v097Tables = setup.service.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'discovery_%_v097' ORDER BY name").all().map((row) => row.name);
+    assert.equal(v097Tables.length, 4);
     assert.equal(setup.database.db.prepare('SELECT COUNT(*) AS count FROM games').get().count, before);
+  } finally { setup.service.close(); setup.database.close(); fs.rmSync(setup.directory, { recursive:true, force:true }); }
+});
+
+test('la V0.9.7 réutilise les corrections exactes, renouvelle les candidats et accepte moins de cinq recommandations', async () => {
+  const setup = fixture();
+  try {
+    const interpretation = await setup.service.interpret({ appId:'1', sourceText:'J’aime comprendre la logique cachée du monde et observer des conséquences cohérentes malgré des informations incomplètes.' });
+    const confirmed = setup.service.confirmInterpretation(interpretation.id, { motivations:interpretation.motivations });
+    const intentionIds = confirmed.intentions.map((item) => item.id);
+    const first = await setup.service.discover({ referenceAppId:'1', intentionIds, queryText:'' });
+    const corrected = first.recommendations[0];
+
+    setup.service.saveFeedback({
+      runId:first.id,
+      appId:corrected.app_id,
+      verdict:'reason_wrong',
+      correctionTarget:'match',
+      familiarity:'played',
+      comment:'Le jeu répond à la logique progressive, mais pas à cette seconde motivation.',
+      intentionAssessments:[{ intentionId:intentionIds[1], association:'rejected', note:'Cette association précise est absente de ce jeu.' }]
+    });
+
+    let reusedMemory = null;
+    setup.service.recommendationAnalyzer = async ({ candidates, intentions, memory }) => {
+      reusedMemory = memory;
+      const candidate = candidates[0];
+      return { recommendations:candidate ? [{
+        app_id:candidate.appId,
+        resonance_score:0.83,
+        confidence:'medium',
+        intention_evaluations:[
+          { intention_id:String(intentions[0].id), status:'satisfied', confidence:0.82, rationale:'Le profil compact documente une logique à reconstruire.', evidence:['Profil compact du candidat.'] },
+          { intention_id:String(intentions[1].id), status:'unsatisfied', confidence:0.71, rationale:'Aucune conséquence décisionnelle n’est documentée.', evidence:[] }
+        ],
+        presentation:`${candidate.title} constitue une piste étayée mais volontairement partielle.`,
+        explanation:`Les éléments disponibles pour ${candidate.title} soutiennent une motivation précise sans prétendre satisfaire automatiquement toutes les autres.`,
+        difference:'La structure et les mécaniques diffèrent du jeu de référence, ce qui permet de tester la motivation indépendamment.',
+        uncertainties:['La réception personnelle du rythme reste inconnue.'],
+        evidence:[`Profil compact disponible pour ${candidate.title}.`]
+      }] : [] };
+    };
+
+    const refined = await setup.service.discover({ referenceAppId:'1', intentionIds, queryText:'', mode:'refine', parentRunId:first.id });
+    assert.equal(refined.mode, 'refine');
+    assert.equal(refined.parent_run_id, first.id);
+    assert.equal(refined.recommendations.length, 1, 'le moteur ne complète plus artificiellement jusqu’à cinq');
+    assert.ok(refined.recommendations[0].intentionEvaluations.some((item) => item.status === 'satisfied'));
+    assert.ok(refined.recommendations[0].intentionEvaluations.some((item) => item.status === 'unsatisfied'));
+    assert.equal(first.recommendations.some((item) => item.app_id === refined.recommendations[0].app_id), false, 'l’affinage renouvelle les jeux proposés');
+    assert.ok(reusedMemory.qualitative.some((item) => item.appId === corrected.app_id && item.comment.includes('logique progressive')));
+    assert.ok(reusedMemory.associations.some((item) => item.appId === corrected.app_id && item.intentionId === intentionIds[1] && item.association === 'rejected'));
+    assert.ok(refined.feedback_memory_count >= 2);
+
+    const learned = setup.service.db.prepare('SELECT * FROM discovery_game_intention_memory_v097 WHERE app_id=? AND intention_id=?').get(corrected.app_id, intentionIds[1]);
+    assert.equal(learned.association, 'rejected');
+    assert.equal(learned.last_reused_run_id, refined.id);
+    assert.equal(learned.reused_count, 1);
+    assert.ok(setup.service.dashboard().counts.memory_reuses >= 2);
   } finally { setup.service.close(); setup.database.close(); fs.rmSync(setup.directory, { recursive:true, force:true }); }
 });

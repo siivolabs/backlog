@@ -12,7 +12,7 @@ const { NetworkCompletionService } = require('./lib/network-completion');
 const { FastSemanticService } = require('./lib/fast-semantic');
 const { DiscoveryService } = require('./lib/discovery');
 
-const VERSION = '0.9.6';
+const VERSION = '0.9.7';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);
@@ -63,7 +63,7 @@ function requireAdmin(req) {
 }
 
 function publicConfig() {
-  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, ollamaConfigured:aiEngine.config.ollamaExplicitlyConfigured, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null, similarityNetwork:true, fastSemanticPipeline:true, experientialDiscovery:true };
+  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, ollamaConfigured:aiEngine.config.ollamaExplicitlyConfigured, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null, similarityNetwork:true, fastSemanticPipeline:true, experientialDiscovery:true, discoveryFeedbackMemory:true };
 }
 
 function addGameNames(items) {
@@ -223,7 +223,7 @@ async function api(req,res,url) {
     return send(res,202,{job:fastSemantic.status()});
   }
 
-  // Backlog Discovery 0.9.6 : mémoire des motivations, présélection hybride et analyse ciblée.
+  // Backlog Discovery 0.9.7 : mémoire réutilisée, renouvellement et évaluations indépendantes.
   if(method==='GET'&&pathname==='/api/v09/discovery/dashboard') return send(res,200,discovery.dashboard());
   if(method==='GET'&&pathname==='/api/v09/discovery/games') return send(res,200,database.listGames({query:url.searchParams.get('query')||'',limit:url.searchParams.get('limit')||20,offset:url.searchParams.get('offset')||0}));
   if(method==='GET'&&pathname==='/api/v09/discovery/intentions') return send(res,200,{items:discovery.listIntentions()});
@@ -235,7 +235,7 @@ async function api(req,res,url) {
   match=pathname.match(/^\/api\/v09\/discovery\/intentions\/(\d+)$/);
   if(method==='PATCH'&&match){requireAdmin(req);const body=await readJson(req);return send(res,200,{intention:discovery.setIntentionActive(match[1],body.active)});}
   if(method==='POST'&&pathname==='/api/v09/discovery/runs'){
-    requireAdmin(req);const body=await readJson(req);return send(res,201,{run:await discovery.discover({referenceAppId:body.referenceAppId,intentionIds:body.intentionIds,queryText:body.queryText||''})});
+    requireAdmin(req);const body=await readJson(req);return send(res,201,{run:await discovery.discover({referenceAppId:body.referenceAppId,intentionIds:body.intentionIds,queryText:body.queryText||'',mode:body.mode||'initial',parentRunId:body.parentRunId||null})});
   }
   match=pathname.match(/^\/api\/v09\/discovery\/runs\/(\d+)$/);
   if(method==='GET'&&match){const run=discovery.getRun(match[1]);return run?send(res,200,{run}):jsonError(res,404,'Découverte introuvable');}

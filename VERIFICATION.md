@@ -1,42 +1,43 @@
-# Vérification de Backlog V0.9.6
+# Vérification de Backlog V0.9.7
 
-## Résultats automatisés
+## Contrôles exécutés
 
-- `npm run check` : syntaxe validée pour le serveur, tous les modules et les deux scripts d’interface.
-- `npm test` : **69 tests réussis sur 69**.
-- Les **67 tests de V0.9.5.0** restent présents et réussissent.
-- Deux tests V0.9.6 valident le parcours Discovery et l’idempotence de sa migration.
-- Le parseur HTML accepte l’interface mise à jour.
+```bash
+npm run check
+npm test
+```
 
-## Contrôles Discovery
+Résultat : **70 tests réussis sur 70**. Les 69 tests de la V0.9.6 restent présents ; un scénario V0.9.7 couvre la boucle d’apprentissage et le renouvellement.
 
-- interprétation initiale stockée comme brouillon ;
-- correction humaine conservée lors de la confirmation ;
-- combinaison de plusieurs intentions confirmées ;
-- embedding unique de la requête expérientielle ;
-- présélection hybride avec scores d’embedding et de métadonnées ;
-- seulement six candidats approfondis dans le scénario de test, pour sept candidats conservés ;
-- cinq recommandations distinctes, chacune avec argument, différence, élément connu et incertitude ;
-- retour qualitatif avec cible de correction ;
-- aucun ajout, remplacement ou changement d’état dans `ai_profile_versions` ;
-- création idempotente des six tables `discovery_*_v096`.
+## Scénario V0.9.7 couvert
 
-## Test d’intégration local
+- un premier run produit cinq recommandations avec le pipeline rapide existant ;
+- un retour « bonne piste, mauvaise raison » est enregistré avec familiarité `played` ;
+- une association exacte jeu–motivation est rejetée ;
+- un run `refine` relit le commentaire et l’association ;
+- les cinq jeux du run parent sont exclus ;
+- l’analyse peut conserver une seule recommandation au lieu d’en forcer cinq ;
+- toutes les motivations sont présentes comme `satisfied` ou `unsatisfied` ;
+- le compteur de réutilisation et le dernier run consommateur sont persistés ;
+- les profils historiques restent inchangés.
 
-Le serveur a été démarré avec une base SQLite temporaire et une bibliothèque minimale. Les contrôles suivants ont réussi :
+## Migration
 
-- `/healthz` annonce `0.9.6` ;
-- `/api/v09/config` annonce `experientialDiscovery: true` tout en conservant `similarityNetwork` et `fastSemanticPipeline` ;
-- `/api/v09/discovery/dashboard` répond avec le schéma `backlog-discovery/1.0` ;
-- `/api/v09/discovery/games` retrouve le jeu de la bibliothèque ;
-- la page principale livre l’onglet **Backlog Discovery** et le script `/discovery.js`.
+- les six tables `discovery_*_v096` existent toujours ;
+- quatre tables `discovery_*_v097` sont créées ;
+- l’appel répété de la migration est idempotent ;
+- aucune donnée de la bibliothèque n’est supprimée.
 
-## Limites de l’environnement de construction
+## Démarrage réel
 
-Le serveur Ollama privé n’a pas été appelé depuis cet environnement. Les nouveaux tests utilisent des doubles déterministes pour Qwen et EmbeddingGemma ; les 67 tests historiques conservent leurs propres doubles. La pertinence réelle des cinq découvertes, les durées Qwen et la qualité des explications doivent donc être évaluées après déploiement avec le lot Control, Persona, Ori, Man of Medan, Until Dawn et DmC.
+Un démarrage sur une base SQLite temporaire a confirmé :
 
-Le client Docker n’est pas disponible dans l’environnement de construction. Le `Dockerfile` et `compose.yaml` sont contrôlés statiquement ; l’exécution et les tests utilisent Node.js 24.
+- `/healthz` renvoie `version: 0.9.7` ;
+- le tableau Discovery renvoie `schemaVersion: backlog-discovery/1.1` ;
+- les compteurs de mémoire sont disponibles ;
+- la page principale affiche `BACKLOG 0.9.7` ;
+- les deux actions de renouvellement sont présentes dans l’interface.
 
-## Intégrité de livraison
+## Performance
 
-`MANIFEST.sha256` contient l’empreinte SHA-256 de chaque fichier livré, hors manifeste. L’archive ZIP et son empreinte externe sont vérifiées après création.
+La V0.9.7 ne crée aucun appel Qwen supplémentaire. Elle conserve une requête d’embedding, une présélection locale et une analyse Qwen limitée par défaut aux 12 meilleurs candidats. La lecture de mémoire est bornée à 40 retours qualitatifs par défaut.

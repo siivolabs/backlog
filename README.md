@@ -1,14 +1,14 @@
-# Backlog V0.9.6 — découverte expérientielle
+# Backlog V0.9.7 — apprentissage et renouvellement des découvertes
 
-Backlog V0.9.6 étend intégralement V0.9.5.0 avec **Backlog Discovery**, un prototype isolé qui part des motivations formulées et confirmées par le joueur. Il utilise les métadonnées et embeddings pour présélectionner des candidats, puis réserve Qwen à l’analyse comparative des candidats prometteurs. Les profils, réseaux et comportements existants ne sont ni remplacés ni réécrits.
+Backlog V0.9.7 étend intégralement V0.9.6 avec une boucle d’apprentissage contextuelle. Les corrections qualitatives et les associations jeu–motivation explicitement validées ou rejetées sont relues lors des recherches suivantes, sans devenir des règles sur un genre ou sur le joueur. La présélection rapide, les profils, les réseaux et toutes les données V0.9.6 restent en place.
 
-## Fonctions V0.9.6
+## Fonctions V0.9.7
 
 ### Backlog Discovery : trois étapes
 
 1. **Pourquoi ce jeu ?** — sélection d’un jeu apprécié, explication libre, interprétation Qwen, correction puis confirmation explicite.
 2. **Explorer les intentions** — mémoire durable des motivations confirmées, désactivation possible et combinaison contextuelle de plusieurs intentions.
-3. **Découvrir** — cinq jeux argumentés avec motivations concernées, différences, éléments utilisés, niveau de confiance et incertitudes.
+3. **Découvrir** — de zéro à cinq jeux réellement étayés, avec évaluation indépendante de chaque motivation comme satisfaite, non satisfaite ou incertaine.
 
 La similarité n’est pas le critère final. Une différence de genre, de structure ou de mécanique peut devenir un argument si le jeu répond autrement à la motivation recherchée.
 
@@ -17,9 +17,11 @@ La similarité n’est pas le critère final. Une différence de genre, de struc
 - une requête EmbeddingGemma représente la combinaison d’intentions ;
 - les embeddings des profils rapides ou actifs et les métadonnées de la bibliothèque classent jusqu’à 40 candidats ;
 - seuls les 12 candidats les plus prometteurs sont transmis à une analyse Qwen comparative ;
-- le résultat conserve les scores de présélection, les sources du candidat et les durées d’embedding, de sélection et d’analyse ;
+- le résultat conserve les scores de présélection, les ajustements issus de la mémoire exacte, les sources du candidat et les durées d’embedding, de sélection et d’analyse ;
 - trois retours qualitatifs distinguent l’intérêt, l’absence de pertinence et une bonne piste expliquée pour la mauvaise raison ;
-- le dernier retour peut préciser si la correction concerne le jeu, le joueur ou leur association.
+- le joueur peut signaler un jeu connu ou déjà joué et valider, rejeter ou laisser incertaine chaque association jeu–motivation ;
+- **Affiner ces recommandations** écarte la série courante ; **Explorer d’autres jeux** écarte toutes les recommandations déjà vues dans le même contexte ;
+- aucune seconde requête IA n’est ajoutée : la mémoire est relue localement avant la même analyse Qwen bornée à 12 candidats.
 
 ### Conservation intégrale de V0.9.5.0
 
@@ -117,7 +119,7 @@ V0.9.5.0 ajoutait :
 - `fast_semantic_items_v095` ;
 - `fast_semantic_edges_v095`.
 
-V0.9.6 ajoute six tables isolées :
+V0.9.6 ajoutait six tables isolées, conservées sans modification :
 
 - `discovery_interpretations_v096` ;
 - `discovery_intentions_v096` ;
@@ -125,6 +127,13 @@ V0.9.6 ajoute six tables isolées :
 - `discovery_candidates_v096` ;
 - `discovery_recommendations_v096` ;
 - `discovery_feedback_v096`.
+
+V0.9.7 ajoute quatre tables :
+
+- `discovery_run_context_v097` : mode, parent, exclusions et volume de mémoire relu ;
+- `discovery_recommendation_intentions_v097` : évaluation indépendante de chaque motivation ;
+- `discovery_feedback_memory_v097` : familiarité, associations explicites et compteur de réutilisation ;
+- `discovery_game_intention_memory_v097` : mémoire locale d’une association exacte entre un AppID et une intention.
 
 Les colonnes de supervision des tâches et campagnes existantes restent conservées. Les migrations sont idempotentes.
 
@@ -166,7 +175,7 @@ Après démarrage :
 curl -fsS http://127.0.0.1:3000/healthz
 ```
 
-Le résultat doit annoncer la version `0.9.6`.
+Le résultat doit annoncer la version `0.9.7`.
 
 ## Variables utiles
 
@@ -190,7 +199,8 @@ Le résultat doit annoncer la version `0.9.6`.
 | `DISCOVERY_CANDIDATE_LIMIT` | `40` | candidats de présélection conservés par exécution |
 | `DISCOVERY_DEEP_CANDIDATES` | `12` | candidats maximum transmis à Qwen |
 | `DISCOVERY_INTERPRET_MAX_TOKENS` | `1600` | plafond de l’interprétation des motivations |
-| `DISCOVERY_ANALYSIS_MAX_TOKENS` | `3600` | plafond de l’analyse comparative ciblée |
+| `DISCOVERY_ANALYSIS_MAX_TOKENS` | `4200` | plafond de l’analyse comparative ciblée et des évaluations indépendantes |
+| `DISCOVERY_MEMORY_LIMIT` | `40` | retours qualitatifs récents relus au maximum |
 | `DISCOVERY_INACTIVITY_TIMEOUT_MS` | `240000` | délai sans fragment des prompts Discovery |
 
 Toutes les mutations exigent le même `ADMIN_TOKEN` que l’administration existante.
