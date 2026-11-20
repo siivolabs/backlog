@@ -1,5 +1,29 @@
 # Journal des modifications
 
+## 0.9.6 — découverte expérientielle
+
+- nouvel onglet **Découverte** en trois étapes, sans remplacement des vues existantes ;
+- sélection d’un jeu apprécié et explication libre des raisons de l’apprécier ;
+- interprétation Qwen structurée, révisable avant toute mémorisation durable ;
+- mémoire d’intentions contextuelles, combinables et désactivables ;
+- présélection hybride par métadonnées et embeddings existants ;
+- analyse Qwen limitée par défaut aux 12 candidats les plus prometteurs ;
+- cinq recommandations argumentées avec différences, éléments connus, confiance et incertitudes ;
+- retours qualitatifs séparant intérêt, inadéquation et erreur d’explication ;
+- six tables SQLite additives et isolées, avec mesures de durée et périmètre analysé ;
+- aucun profil, embedding, réseau ou cycle de validation existant modifié.
+
+## 0.9.5.0 — pipeline sémantique rapide et réseau indépendant
+
+- second chemin expérimental basé uniquement sur les dossiers documentaires existants ;
+- profil compact `backlog-fast-semantic/1.0` sur 11 dimensions discriminantes ;
+- génération Qwen bornée, sans collecte web, preuves détaillées, réparation de chemins ni vérification factuelle ;
+- embeddings et relations conservés dans trois tables additives séparées ;
+- modes intelligent et reconstruction, suspension/reprise entre les jeux et réutilisation par empreinte de dossier ;
+- télémétrie par jeu : analyse, embedding, durée totale, médiane, P95 et codes d’erreur ;
+- comparaison séparée des voisins rapides dans l’interface ;
+- 67 tests réussis, dont conservation des profils historiques et scénario de réutilisation.
+
 ## 0.9.4.4 — streaming Qwen et tolérance documentaire bornée
 
 - génération, réparation et vérification Qwen en streaming NDJSON avec délai d’inactivité ;

@@ -1,8 +1,42 @@
-# Backlog V0.9.4.4 — campagnes IA supervisées et reprenables
+# Backlog V0.9.6 — découverte expérientielle
 
-Backlog V0.9.4.4 conserve l’application complète (bibliothèque, fiches, profils, sources, historique, expérience personnelle, administration et réseau de similarité) et ajoute une supervision persistante des campagnes d’analyse.
+Backlog V0.9.6 étend intégralement V0.9.5.0 avec **Backlog Discovery**, un prototype isolé qui part des motivations formulées et confirmées par le joueur. Il utilise les métadonnées et embeddings pour présélectionner des candidats, puis réserve Qwen à l’analyse comparative des candidats prometteurs. Les profils, réseaux et comportements existants ne sont ni remplacés ni réécrits.
 
-## Fonctions V0.9.4.4
+## Fonctions V0.9.6
+
+### Backlog Discovery : trois étapes
+
+1. **Pourquoi ce jeu ?** — sélection d’un jeu apprécié, explication libre, interprétation Qwen, correction puis confirmation explicite.
+2. **Explorer les intentions** — mémoire durable des motivations confirmées, désactivation possible et combinaison contextuelle de plusieurs intentions.
+3. **Découvrir** — cinq jeux argumentés avec motivations concernées, différences, éléments utilisés, niveau de confiance et incertitudes.
+
+La similarité n’est pas le critère final. Une différence de genre, de structure ou de mécanique peut devenir un argument si le jeu répond autrement à la motivation recherchée.
+
+### Coût IA ciblé et résultats mesurables
+
+- une requête EmbeddingGemma représente la combinaison d’intentions ;
+- les embeddings des profils rapides ou actifs et les métadonnées de la bibliothèque classent jusqu’à 40 candidats ;
+- seuls les 12 candidats les plus prometteurs sont transmis à une analyse Qwen comparative ;
+- le résultat conserve les scores de présélection, les sources du candidat et les durées d’embedding, de sélection et d’analyse ;
+- trois retours qualitatifs distinguent l’intérêt, l’absence de pertinence et une bonne piste expliquée pour la mauvaise raison ;
+- le dernier retour peut préciser si la correction concerne le jeu, le joueur ou leur association.
+
+### Conservation intégrale de V0.9.5.0
+
+Le pipeline sémantique rapide et le réseau indépendant restent disponibles sans changement.
+
+### Pipeline sémantique rapide
+
+- extraction Qwen d’un profil compact structuré sur 11 dimensions comparables ;
+- aucune génération de preuves détaillées, réparation de chemins ou vérification factuelle dans ce chemin expérimental ;
+- EmbeddingGemma sur une représentation courte et stable ;
+- stockage totalement séparé dans `fast_semantic_*_v095` ;
+- mode intelligent qui réutilise un résultat lorsque l’empreinte du dossier et le modèle d’embedding n’ont pas changé ;
+- mode reconstruction qui régénère explicitement la sélection ;
+- mesure par jeu du temps d’analyse, du temps d’embedding et de la durée totale ;
+- objectif affiché : 50 jeux en moins de dix minutes, à valider sur l’installation réelle.
+
+Le réseau rapide est indépendant du réseau V0.9.4 et de `ai_similarity_cache`. Ses recommandations apparaissent séparément dans la fiche du jeu.
 
 ### Supervision sans pourcentage artificiel
 
@@ -72,12 +106,27 @@ La migration est uniquement additive. Elle conserve notamment :
 - les réglages `ADMIN_TOKEN`, Ollama et SearXNG ;
 - les tables du réseau V0.9.4 et de complétion V0.9.4.1.
 
-V0.9.4.4 ajoute deux tables :
+V0.9.4.4 avait ajouté deux tables :
 
 - `ai_analysis_checkpoints_v0943` ;
 - `ai_analysis_events_v0943`.
 
-Elle ajoute aussi des colonnes de supervision aux tables de tâches et de campagnes existantes. Les migrations sont idempotentes.
+V0.9.5.0 ajoutait :
+
+- `fast_semantic_runs_v095` ;
+- `fast_semantic_items_v095` ;
+- `fast_semantic_edges_v095`.
+
+V0.9.6 ajoute six tables isolées :
+
+- `discovery_interpretations_v096` ;
+- `discovery_intentions_v096` ;
+- `discovery_runs_v096` ;
+- `discovery_candidates_v096` ;
+- `discovery_recommendations_v096` ;
+- `discovery_feedback_v096`.
+
+Les colonnes de supervision des tâches et campagnes existantes restent conservées. Les migrations sont idempotentes.
 
 ## Déploiement
 
@@ -117,7 +166,7 @@ Après démarrage :
 curl -fsS http://127.0.0.1:3000/healthz
 ```
 
-Le résultat doit annoncer la version `0.9.4.4`.
+Le résultat doit annoncer la version `0.9.6`.
 
 ## Variables utiles
 
@@ -133,5 +182,15 @@ Le résultat doit annoncer la version `0.9.4.4`.
 | `AI_VERIFICATION_INACTIVITY_TIMEOUT_MS` | `480000` | délai sans fragment de vérification |
 | `AI_OLLAMA_HEALTH_TIMEOUT_MS` | `10000` | contrôle avant suspension automatique |
 | `AI_EMBEDDING_TIMEOUT_MS` | `120000` | délai d’embedding |
+| `FAST_SEMANTIC_SIZE` | `50` | limite de secours si aucune sélection réseau n’existe |
+| `FAST_SEMANTIC_MAX_INPUT_CHARS` | `28000` | taille maximale du dossier transmis au prompt compact |
+| `FAST_SEMANTIC_MAX_TOKENS` | `1200` | plafond de sortie du profil compact |
+| `FAST_SEMANTIC_INACTIVITY_TIMEOUT_MS` | `180000` | délai sans fragment du prompt rapide |
+| `DISCOVERY_LIBRARY_LIMIT` | `5000` | nombre maximal de jeux inspectés par métadonnées |
+| `DISCOVERY_CANDIDATE_LIMIT` | `40` | candidats de présélection conservés par exécution |
+| `DISCOVERY_DEEP_CANDIDATES` | `12` | candidats maximum transmis à Qwen |
+| `DISCOVERY_INTERPRET_MAX_TOKENS` | `1600` | plafond de l’interprétation des motivations |
+| `DISCOVERY_ANALYSIS_MAX_TOKENS` | `3600` | plafond de l’analyse comparative ciblée |
+| `DISCOVERY_INACTIVITY_TIMEOUT_MS` | `240000` | délai sans fragment des prompts Discovery |
 
 Toutes les mutations exigent le même `ADMIN_TOKEN` que l’administration existante.

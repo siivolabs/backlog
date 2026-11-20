@@ -9,8 +9,10 @@ const { AiEngine } = require('./lib/ai-engine');
 const { SimilarityExperiment } = require('./lib/similarity-experiment');
 const { OllamaClient } = require('./lib/network-ollama');
 const { NetworkCompletionService } = require('./lib/network-completion');
+const { FastSemanticService } = require('./lib/fast-semantic');
+const { DiscoveryService } = require('./lib/discovery');
 
-const VERSION = '0.9.4.4';
+const VERSION = '0.9.6';
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const databasePath = resolveDatabasePath(process.env);
@@ -25,6 +27,12 @@ const networkCompletion = new NetworkCompletionService({
   experiment: similarityExperiment, database, aiEngine, embeddingClient: networkOllama,
   pollIntervalMs: Number(process.env.NETWORK_JOB_POLL_MS || 500),
   jobTimeoutMs: Number(process.env.NETWORK_GAME_TIMEOUT_MS || 45 * 60 * 1000)
+});
+const fastSemantic = new FastSemanticService({
+  filename: databasePath, database, aiEngine, embeddingClient: networkOllama, env: process.env
+});
+const discovery = new DiscoveryService({
+  filename: databasePath, database, aiEngine, embeddingClient: networkOllama, env: process.env
 });
 let networkJob = null;
 aiEngine.start();
@@ -55,7 +63,7 @@ function requireAdmin(req) {
 }
 
 function publicConfig() {
-  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, ollamaConfigured:aiEngine.config.ollamaExplicitlyConfigured, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null, similarityNetwork:true };
+  return { version:VERSION, adminTokenRequired:Boolean(process.env.ADMIN_TOKEN), analysisModel:aiEngine.config.analysisModel, embeddingModel:aiEngine.config.embeddingModel, embeddingDimensions:aiEngine.config.embeddingDimensions, ollamaConfigured:aiEngine.config.ollamaExplicitlyConfigured, searxngConfigured:Boolean(aiEngine.config.searxngBaseUrl), databaseFile:path.basename(databasePath), librarySource:database.discoverLibrarySource()?.table||null, similarityNetwork:true, fastSemanticPipeline:true, experientialDiscovery:true };
 }
 
 function addGameNames(items) {
@@ -123,7 +131,7 @@ async function api(req,res,url) {
   if(method==='PUT'&&pathname==='/api/v09/feedback/similarity'){ requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:database.saveSimilarityFeedback(body)}); }
 
 
-  // Réseau expérimental 0.9.4.4 : campagnes persistantes, supervisées et reprenables.
+  // Réseau expérimental historique : campagnes persistantes, supervisées et reprenables.
   if(method==='GET'&&pathname==='/api/v09/network/dashboard') return send(res,200,similarityExperiment.dashboard());
   if(method==='GET'&&pathname==='/api/v09/network/games') return send(res,200,{games:similarityExperiment.libraryGames(Number(url.searchParams.get('limit')||10000),{query:url.searchParams.get('query')||'',status:url.searchParams.get('status')||'all'})});
   if(method==='GET'&&pathname==='/api/v09/network/job') return send(res,200,{job:persistentNetworkJob()});
@@ -146,7 +154,7 @@ async function api(req,res,url) {
   }
   if(method==='POST'&&pathname==='/api/v09/network/rebuild'){
     requireAdmin(req);
-    if(networkJob?.status==='running'||networkCompletion.running) throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
+    if(networkJob?.status==='running'||networkCompletion.running||fastSemantic.running) throw Object.assign(new Error('Une opération réseau ou sémantique est déjà en cours'),{statusCode:409});
     networkJob={type:'network',status:'running',startedAt:new Date().toISOString()};
     try { const result=similarityExperiment.rebuildNetwork(); networkJob={...networkJob,status:'completed',finishedAt:new Date().toISOString(),result}; return send(res,200,result); }
     catch(error){ networkJob={...networkJob,status:'failed',finishedAt:new Date().toISOString(),error:String(error.message||error)}; throw error; }
@@ -164,7 +172,7 @@ async function api(req,res,url) {
   }
   if(method==='POST'&&pathname==='/api/v09/network/complete'){
     requireAdmin(req);const body=await readJson(req);const mode=body.mode==='full'?'full':'smart';
-    if(networkJob?.status==='running'||networkCompletion.running) throw Object.assign(new Error('Une opération réseau est déjà en cours'),{statusCode:409});
+    if(networkJob?.status==='running'||networkCompletion.running||fastSemantic.running) throw Object.assign(new Error('Une opération réseau ou sémantique est déjà en cours'),{statusCode:409});
     const plan=networkCompletion.publicPlan({mode});
     networkJob={type:'completion',status:'running',phase:'planning',mode,startedAt:new Date().toISOString(),current:0,total:plan.length,plan};
     setImmediate(async()=>{
@@ -189,6 +197,50 @@ async function api(req,res,url) {
   }
   if(method==='PUT'&&pathname==='/api/v09/network/feedback'){
     requireAdmin(req); const body=await readJson(req); return send(res,200,{feedback:similarityExperiment.saveFeedback(body)});
+  }
+
+  // Pipeline sémantique rapide 0.9.5.0 : stockage et réseau totalement séparés.
+  if(method==='GET'&&pathname==='/api/v09/fast/dashboard') return send(res,200,fastSemantic.dashboard());
+  if(method==='GET'&&pathname==='/api/v09/fast/job') return send(res,200,{job:fastSemantic.status()});
+  if(method==='GET'&&pathname==='/api/v09/fast/runs') return send(res,200,{items:fastSemantic.history(url.searchParams.get('limit')||20)});
+  match=pathname.match(/^\/api\/v09\/fast\/runs\/(\d+)$/);
+  if(method==='GET'&&match){const run=fastSemantic.getRun(match[1]);return run?send(res,200,{run}):jsonError(res,404,'Campagne rapide introuvable');}
+  match=pathname.match(/^\/api\/v09\/fast\/games\/([^/]+)\/similar$/);
+  if(method==='GET'&&match) return send(res,200,{appId:decodeURIComponent(match[1]),recommendations:fastSemantic.recommendations(decodeURIComponent(match[1]),url.searchParams.get('limit')||5,url.searchParams.get('runId')||null)});
+  if(method==='POST'&&pathname==='/api/v09/fast/run'){
+    requireAdmin(req);const body=await readJson(req);const mode=body.mode==='rebuild'?'rebuild':'smart';
+    if(fastSemantic.running||networkCompletion.running||networkJob?.status==='running') throw Object.assign(new Error('Une opération réseau ou sémantique est déjà en cours'),{statusCode:409});
+    void fastSemantic.run({mode}).catch((error)=>console.error(error));
+    return send(res,202,{job:{...fastSemantic.status(),requestedMode:mode}});
+  }
+  if(method==='POST'&&pathname==='/api/v09/fast/pause'){
+    requireAdmin(req);return send(res,202,{job:fastSemantic.pause()});
+  }
+  if(method==='POST'&&pathname==='/api/v09/fast/resume'){
+    requireAdmin(req);
+    if(fastSemantic.running||networkCompletion.running||networkJob?.status==='running') throw Object.assign(new Error('Une opération réseau ou sémantique est déjà en cours'),{statusCode:409});
+    void fastSemantic.resume().catch((error)=>console.error(error));
+    return send(res,202,{job:fastSemantic.status()});
+  }
+
+  // Backlog Discovery 0.9.6 : mémoire des motivations, présélection hybride et analyse ciblée.
+  if(method==='GET'&&pathname==='/api/v09/discovery/dashboard') return send(res,200,discovery.dashboard());
+  if(method==='GET'&&pathname==='/api/v09/discovery/games') return send(res,200,database.listGames({query:url.searchParams.get('query')||'',limit:url.searchParams.get('limit')||20,offset:url.searchParams.get('offset')||0}));
+  if(method==='GET'&&pathname==='/api/v09/discovery/intentions') return send(res,200,{items:discovery.listIntentions()});
+  if(method==='POST'&&pathname==='/api/v09/discovery/interpret'){
+    requireAdmin(req);const body=await readJson(req);return send(res,201,{interpretation:await discovery.interpret({appId:body.appId,sourceText:body.sourceText})});
+  }
+  match=pathname.match(/^\/api\/v09\/discovery\/interpretations\/(\d+)\/confirm$/);
+  if(method==='PUT'&&match){requireAdmin(req);const body=await readJson(req);return send(res,200,discovery.confirmInterpretation(match[1],body));}
+  match=pathname.match(/^\/api\/v09\/discovery\/intentions\/(\d+)$/);
+  if(method==='PATCH'&&match){requireAdmin(req);const body=await readJson(req);return send(res,200,{intention:discovery.setIntentionActive(match[1],body.active)});}
+  if(method==='POST'&&pathname==='/api/v09/discovery/runs'){
+    requireAdmin(req);const body=await readJson(req);return send(res,201,{run:await discovery.discover({referenceAppId:body.referenceAppId,intentionIds:body.intentionIds,queryText:body.queryText||''})});
+  }
+  match=pathname.match(/^\/api\/v09\/discovery\/runs\/(\d+)$/);
+  if(method==='GET'&&match){const run=discovery.getRun(match[1]);return run?send(res,200,{run}):jsonError(res,404,'Découverte introuvable');}
+  if(method==='PUT'&&pathname==='/api/v09/discovery/feedback'){
+    requireAdmin(req);const body=await readJson(req);return send(res,200,{feedback:discovery.saveFeedback(body)});
   }
   return false;
 }
@@ -220,7 +272,7 @@ server.listen(PORT,'0.0.0.0',()=>{
   console.log(`SearXNG : ${aiEngine.config.searxngBaseUrl?'configuré':'optionnel, non configuré'}`);
 });
 
-function shutdown(){ aiEngine.stop(); server.close(()=>{similarityExperiment.close();database.close();process.exit(0);}); setTimeout(()=>process.exit(1),5000).unref(); }
+function shutdown(){ aiEngine.stop(); server.close(()=>{discovery.close();fastSemantic.close();similarityExperiment.close();database.close();process.exit(0);}); setTimeout(()=>process.exit(1),5000).unref(); }
 process.on('SIGTERM',shutdown); process.on('SIGINT',shutdown);
 
-module.exports={server,database,aiEngine,similarityExperiment,networkCompletion,VERSION};
+module.exports={server,database,aiEngine,similarityExperiment,networkCompletion,fastSemantic,discovery,VERSION};

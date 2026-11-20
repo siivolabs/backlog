@@ -1,6 +1,6 @@
 {
   "name": "backlog",
-  "version": "0.9.4.4",
+  "version": "0.9.6",
   "private": true,
   "description": "Backlog complet avec base de connaissances IA et réseau expérimental de similarité intégré",
   "type": "commonjs",
@@ -10,6 +10,6 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test --test-reporter=spec",
-    "check": "node --check server.js && node --check lib/database.js && node --check lib/ai-engine.js && node --check lib/similarity-experiment.js && node --check lib/network-profile.js && node --check lib/network.js && node --check lib/network-ollama.js && node --check lib/network-completion.js && node --check lib/error-classifier.js && node --check public/app.js"
+    "check": "node --check server.js && node --check lib/database.js && node --check lib/ai-engine.js && node --check lib/similarity-experiment.js && node --check lib/network-profile.js && node --check lib/network.js && node --check lib/network-ollama.js && node --check lib/network-completion.js && node --check lib/fast-semantic.js && node --check lib/discovery.js && node --check lib/error-classifier.js && node --check public/app.js && node --check public/discovery.js"
   }
 }

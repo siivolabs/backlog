@@ -6,10 +6,11 @@
   <title>Backlog · Connaissances IA</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
+  <script src="/discovery.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <div><span class="eyebrow">BACKLOG 0.9.4.4</span><h1>Connaissances IA</h1><p>Comprendre les jeux à partir de dossiers documentaires vérifiables.</p></div>
+    <div><span class="eyebrow">BACKLOG 0.9.6</span><h1>Connaissances IA</h1><p>Comprendre les jeux et découvrir les expériences qui peuvent vous toucher.</p></div>
     <div class="service"><span id="serviceDot" class="dot"></span><span id="serviceState">Connexion…</span></div>
   </header>
   <nav class="tabs" aria-label="Navigation principale">
@@ -17,6 +18,7 @@
     <button class="tab" data-view="library">Bibliothèque</button>
     <button class="tab" data-view="knowledge">Connaissances IA</button>
     <button class="tab" data-view="network">Réseau de similarité</button>
+    <button class="tab" data-view="discovery">Découverte</button>
     <button class="tab" data-view="errors">Erreurs</button>
     <button class="tab" data-view="admin">Administration IA</button>
   </nav>
@@ -52,6 +54,16 @@
         <div class="button-row"><button id="networkCompleteBtn" class="button secondary">Compléter le réseau</button><button id="networkFullBtn" class="button secondary">Reconstruire les 50 analyses</button><button id="networkPauseBtn" class="button secondary">Suspendre</button><button id="networkResumeBtn" class="button secondary">Reprendre</button><button id="networkRebuildBtn" class="button">Recalculer le réseau</button></div>
       </div>
       <div id="networkJob" class="panel network-job" hidden></div>
+      <article id="fastSemanticPanel" class="panel">
+        <div class="section-head">
+          <div><span class="eyebrow">NOUVEAU · PIPELINE SÉMANTIQUE RAPIDE</span><h3>Réseau compact indépendant</h3><p>Extrait uniquement les caractéristiques discriminantes des dossiers existants, crée des embeddings séparés et ne modifie aucun profil historique.</p></div>
+          <div class="button-row"><button id="fastSemanticRunBtn" class="button">Lancer le mode rapide</button><button id="fastSemanticRebuildBtn" class="button secondary">Forcer la reconstruction</button><button id="fastSemanticPauseBtn" class="button secondary">Suspendre</button><button id="fastSemanticResumeBtn" class="button secondary">Reprendre</button></div>
+        </div>
+        <div class="network-metrics"><div><strong id="fastCompletedMetric">0</strong><small>profils prêts</small></div><div><strong id="fastEmbeddedMetric">0</strong><small>embeddings</small></div><div><strong id="fastPairsMetric">0</strong><small>relations</small></div><div><strong id="fastDurationMetric">—</strong><small>durée totale</small></div></div>
+        <div class="network-progress"><i id="fastProgressBar"></i></div>
+        <p id="fastSemanticCaption" class="muted">Aucune campagne rapide exécutée.</p>
+        <div id="fastSemanticJob" class="campaign-log" hidden></div>
+      </article>
       <div class="network-axis-grid">
         <article class="network-axis-card">
           <div class="network-axis-title"><span>→</span><div><small>AXE HORIZONTAL</small><h3>Couverture</h3></div></div>
@@ -71,6 +83,43 @@
       <div class="panel"><span class="eyebrow">DIAGNOSTIC</span><h3>Dimensions les plus souvent absentes</h3><div id="networkMissingDimensions" class="network-dimensions"></div></div>
     </section>
 
+    <section id="discoveryView" class="view">
+      <div class="section-head">
+        <div><span class="eyebrow">PROTOTYPE ISOLÉ · V0.9.6</span><h2>Backlog Discovery</h2><p>Partez d’un jeu apprécié, explicitez ce qui compte pour vous, puis découvrez cinq œuvres capables d’y répondre par des moyens parfois très différents.</p></div>
+        <div id="discoveryMetrics" class="discovery-metrics" aria-live="polite"></div>
+      </div>
+      <ol class="discovery-steps" aria-label="Parcours de découverte">
+        <li class="active"><b>1</b><span>Pourquoi ce jeu ?</span></li>
+        <li><b>2</b><span>Combiner les intentions</span></li>
+        <li><b>3</b><span>Découvrir cinq jeux</span></li>
+      </ol>
+
+      <article class="panel discovery-stage" id="discoveryStageOne">
+        <span class="eyebrow">ÉTAPE 1</span><h3>Choisir un jeu apprécié</h3>
+        <div class="discovery-game-picker">
+          <label>Rechercher dans la bibliothèque<input id="discoveryGameSearch" type="search" autocomplete="off" placeholder="Titre ou Steam AppID exact…"></label>
+          <div id="discoveryGameResults" class="discovery-game-results" hidden></div>
+          <div id="discoverySelectedGame" class="discovery-selected-game"><p class="muted">Aucun jeu sélectionné.</p></div>
+        </div>
+        <label>Pourquoi aimez-vous ce jeu ?<textarea id="discoveryReason" rows="6" maxlength="6000" placeholder="Décrivez librement ce que cette expérience vous fait vivre, ce que vous cherchez à comprendre, ressentir, explorer ou éprouver…"></textarea></label>
+        <div class="button-row"><button id="discoveryInterpretBtn" class="button" disabled>Interpréter mes motivations</button></div>
+        <div id="discoveryInterpretation" hidden></div>
+      </article>
+
+      <article class="panel discovery-stage" id="discoveryStageTwo">
+        <span class="eyebrow">ÉTAPE 2</span><h3>Explorer et combiner les intentions</h3>
+        <p>Choisissez une ou plusieurs motivations confirmées. Elles restent contextuelles et ne constituent pas un profil psychologique figé.</p>
+        <div id="discoveryIntentions" class="discovery-intentions"><div class="empty">Aucune intention confirmée pour le moment.</div></div>
+        <label>Ce que je recherche aujourd’hui (facultatif)<textarea id="discoveryQuery" rows="3" maxlength="2000" placeholder="Ajoutez une nuance, une humeur ou un type de différence que vous souhaitez explorer…"></textarea></label>
+        <div class="button-row"><button id="discoveryRunBtn" class="button" disabled>Découvrir cinq jeux</button></div>
+      </article>
+
+      <article class="discovery-stage" id="discoveryStageThree" hidden>
+        <div class="section-head"><div><span class="eyebrow">ÉTAPE 3</span><h3>Cinq résonances expérientielles</h3><p id="discoveryRunSummary" class="muted"></p></div></div>
+        <div id="discoveryRecommendations" class="discovery-recommendations"></div>
+      </article>
+    </section>
+
     <section id="errorsView" class="view">
       <div class="section-head"><div><span class="eyebrow">DIAGNOSTIC</span><h2>Analyses en erreur</h2></div><button id="refreshErrors" class="button secondary">Actualiser</button></div>
       <div id="errorList" class="error-list"></div>
@@ -84,7 +133,7 @@
         <div class="button-row"><button id="saveToken" class="button secondary">Mémoriser pour cet onglet</button><button id="testAi" class="button">Tester Ollama</button></div>
         <pre id="testResult" class="result" hidden></pre>
       </div>
-      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.4.4 conserve les preuves par caractéristique, les points de reprise, la vérification factuelle et la réutilisation des corrections humaines sans réécrire les profils existants. Aucune table n’est supprimée. Une campagne ne démarre qu’après une action explicite.</p></div>
+      <div class="panel warning"><strong>Migration additive</strong><p>Backlog 0.9.6 conserve les preuves par caractéristique, les points de reprise, la vérification factuelle, le pipeline rapide et tous les réseaux existants. Backlog Discovery utilise six tables séparées. Aucune table n’est supprimée et aucune connaissance validée n’est réécrite.</p></div>
     </section>
   </main>
 
