@@ -1,25 +1,213 @@
-'use strict';
-const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
-const state={status:null,games:[],total:0,offset:0,limit:40,filter:'all',q:'',batch:[],poll:null};
-function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
-function cover(game){return game.cover_url||(/^\d+$/.test(game.app_id)?`https://cdn.cloudflare.steamstatic.com/steam/apps/${game.app_id}/header.jpg`:null);}
-function notify(message,type=''){const t=$('#toast');t.textContent=message;t.className=`toast show ${type}`;clearTimeout(notify.timer);notify.timer=setTimeout(()=>t.className='toast',3500);}
-async function api(url,options={}){const token=sessionStorage.getItem('backlogAdminToken');const headers={'content-type':'application/json',...(token?{'x-admin-token':token}:{}),...(options.headers||{})};const response=await fetch(url,{...options,headers,body:options.body&&typeof options.body!=='string'?JSON.stringify(options.body):options.body});const data=await response.json().catch(()=>({}));if(response.status===401&&!options._retried){const supplied=prompt('Jeton administrateur Backlog Core :');if(supplied){sessionStorage.setItem('backlogAdminToken',supplied);return api(url,{...options,_retried:true});}}if(!response.ok)throw new Error(data.error||`Erreur ${response.status}`);return data;}
-function showView(name){$$('.view,.nav').forEach(x=>x.classList.remove('active'));$(`#${name}`).classList.add('active');$(`.nav[data-view="${name}"]`).classList.add('active');location.hash=name;if(name==='enrichment')loadBatch();if(name==='discovery')loadReferences();}
-async function loadStatus(){state.status=await api('/api/status');$('#inventoryCount').textContent=Number(state.status.inventory).toLocaleString('fr-FR');$('#analyzedCount').textContent=state.status.analyzed;$('#selectedCount').textContent=state.status.selected;$('#batchCount').textContent=state.status.selected;const alert=$('#importAlert');if(!state.status.inventory){alert.classList.remove('hidden');alert.innerHTML='<strong>Aucun inventaire importé.</strong> Vérifiez que la base historique est montée sur <code>/data/backlog.sqlite</code>, puis relancez l’import depuis le diagnostic.';}else alert.classList.add('hidden');}
-function gameCard(game){const img=cover(game);return `<article class="game-card" data-app="${esc(game.app_id)}"><div class="cover">${img?`<img src="${esc(img)}" alt="" loading="lazy" data-fallback="${esc(game.title.slice(0,1))}">`:`<div class="cover-fallback">${esc(game.title.slice(0,1))}</div>`}<span class="status-dot ${game.status==='analyzed'?'analyzed':''}" title="${game.status==='analyzed'?'Analysé':'Inventorié'}"></span><button class="select-game ${game.selected?'selected':''}" data-select="${esc(game.app_id)}" title="${game.selected?'Retirer du lot':'Ajouter au lot'}">${game.selected?'✓':'+'}</button></div><div class="game-meta"><h3>${esc(game.title)}</h3><p>${esc(game.studio||game.genres||`AppID ${game.app_id}`)}</p></div></article>`;}
-async function loadGames(reset=true){if(reset){state.offset=0;state.games=[];}const params=new URLSearchParams({q:state.q,status:state.filter,limit:state.limit,offset:state.offset});const result=await api('/api/games?'+params);state.total=result.total;state.games.push(...result.items);state.offset=state.games.length;$('#gameGrid').innerHTML=state.games.length?state.games.map(gameCard).join(''):'<div class="empty-state">Aucun jeu ne correspond à cette recherche.</div>';$('#resultCount').textContent=`${state.total.toLocaleString('fr-FR')} jeu${state.total>1?'x':''}`;$('#loadMore').classList.toggle('hidden',state.offset>=state.total);bindGameCards();}
-function bindGameCards(){$$('.game-card').forEach(card=>card.addEventListener('click',e=>{if(e.target.closest('.select-game'))return;openGame(card.dataset.app);}));$$('.select-game').forEach(btn=>btn.addEventListener('click',()=>toggleBatch(btn.dataset.select,!btn.classList.contains('selected'))));$$('img[data-fallback]').forEach(img=>img.addEventListener('error',()=>{const fallback=document.createElement('div');fallback.className='cover-fallback';fallback.textContent=img.dataset.fallback||'?';img.replaceWith(fallback);},{once:true}));}
-async function toggleBatch(appId,selected){try{const result=await api('/api/batch',{method:'PUT',body:{appId,selected}});state.batch=result.items;await Promise.all([loadStatus(),loadGames(true)]);if($('#enrichment').classList.contains('active'))renderBatch();notify(selected?'Ajouté au lot':'Retiré du lot');}catch(e){notify(e.message,'error');}}
-async function openGame(appId){try{const {game,profile}=await api('/api/games/'+encodeURIComponent(appId));const p=profile?.profile;$('#gameDialogBody').innerHTML=`<p class="eyebrow">${esc(game.status.toUpperCase())} · STEAM ${esc(game.app_id)}</p><h1>${esc(game.title)}</h1><p class="muted">${esc(game.studio||'Studio inconnu')} · ${esc(game.genres||'Genres non renseignés')}</p>${p?profileHtml(p):'<div class="notice">Ce jeu ne possède encore aucune connaissance IA dans Backlog Core.</div>'}`;$('#gameDialog').showModal();}catch(e){notify(e.message,'error');}}
-function profileHtml(p){const sections=[['Vue d’ensemble',p.overview],['Boucles',p.loops],['Intentions',p.experiential_intentions],['Signatures',p.signatures],['Structure',p.structure],['Progression',p.progression],['Difficulté',p.difficulty],['Incertitudes',p.uncertainties]];return `<div class="profile-grid">${sections.map(([t,v])=>`<div class="profile-section"><h4>${esc(t)}</h4>${Array.isArray(v)?`<ul>${v.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:`<p class="muted">${esc(v||'Non renseigné')}</p>`}</div>`).join('')}</div>`;}
-async function loadBatch(){await loadStatus();const data=await api('/api/batch');state.batch=data.items;renderBatch();await loadRun();}
-function renderBatch(){$('#batchCount').textContent=state.batch.length;$('#batchList').innerHTML=state.batch.length?state.batch.map(g=>`<div class="batch-item">${cover(g)?`<img src="${esc(cover(g))}" alt="">`:'<div class="mini-cover"></div>'}<div><strong>${esc(g.title)}</strong><span>${g.status==='analyzed'?'Profil existant — sera remplacé':'À enrichir'}</span></div><button class="remove" data-remove="${esc(g.app_id)}">×</button></div>`).join(''):'<div class="empty-state">Ajoutez des jeux depuis la bibliothèque.</div>';$$('[data-remove]').forEach(b=>b.onclick=()=>toggleBatch(b.dataset.remove,false));$('#startRun').disabled=!state.batch.length;}
-async function loadRun(){const result=await api('/api/enrichment');renderRun(result);if(result.running&&!state.poll)state.poll=setInterval(loadRun,1500);if(!result.running&&state.poll){clearInterval(state.poll);state.poll=null;await loadStatus();}}
-function renderRun(result){const run=result.run;$('#pauseRun').classList.toggle('hidden',!result.running);$('#resumeRun').classList.toggle('hidden',run?.status!=='paused');$('#startRun').classList.toggle('hidden',result.running||run?.status==='paused');if(!run){$('#runSummary').className='run-summary empty-state';$('#runSummary').textContent='Aucun enrichissement lancé.';return;}const pct=run.selected_count?Math.round((run.completed_count+run.failed_count)/run.selected_count*100):0;$('#runSummary').className='run-summary';$('#runSummary').innerHTML=`<div><strong>${esc(run.status)}</strong> · ${run.completed_count}/${run.selected_count} terminés${run.failed_count?` · ${run.failed_count} échec(s)`:''}</div><div class="progress"><span style="width:${pct}%"></span></div>${run.items.map(i=>`<div class="run-item ${esc(i.status)}"><div><strong>${esc(i.title)}</strong><span>${esc(i.step)}${i.error?` — ${esc(i.error)}`:''}</span></div>${i.status==='completed'?`<button class="text-btn" data-profile="${esc(i.app_id)}">Voir</button>`:''}</div>`).join('')}`;$$('[data-profile]').forEach(b=>b.onclick=()=>openGame(b.dataset.profile));}
-async function loadReferences(){const result=await api('/api/games?status=analyzed&limit=100');$('#referenceSelect').innerHTML='<option value="">Choisir un jeu analysé…</option>'+result.items.map(g=>`<option value="${esc(g.app_id)}">${esc(g.title)}</option>`).join('');}
-async function discover(){const referenceAppId=$('#referenceSelect').value,motivationText=$('#motivationInput').value.trim();if(!referenceAppId||!motivationText)return notify('Choisissez un jeu et décrivez vos motivations.','error');const btn=$('#discoverBtn');btn.disabled=true;btn.textContent='Recherche des résonances…';try{const result=await api('/api/discovery',{method:'POST',body:{referenceAppId,motivationText,limit:5}});renderRecommendations(result);}catch(e){notify(e.message,'error');}finally{btn.disabled=false;btn.textContent='Trouver les résonances';}}
-function renderRecommendations(result){const root=$('#discoveryResults');if(!result.items.length){root.innerHTML='<div class="notice">Aucun jeu analysé ne présente une résonance suffisamment solide. Backlog préfère ne rien recommander plutôt que de forcer un résultat.</div>';return;}root.innerHTML=`<div class="section-head"><div><p class="eyebrow">${result.items.length} RÉSONANCE${result.items.length>1?'S':''}</p><h2>Les expériences les plus proches</h2></div></div>`+result.items.map(x=>`<article class="recommendation">${x.coverUrl?`<img src="${esc(x.coverUrl)}" alt="">`:'<div class="cover-fallback"></div>'}<div><h3>${esc(x.title)}</h3><p class="muted">${esc(x.overview||'')}</p><p>${x.reasons.map(esc).join(' · ')}</p><div class="feedback"><button data-feedback="relevant" data-ref="${esc(result.reference.app_id)}" data-candidate="${esc(x.appId)}">Pertinent</button><button data-feedback="not_relevant" data-ref="${esc(result.reference.app_id)}" data-candidate="${esc(x.appId)}">Pas pour moi</button></div></div><div class="score"><strong>${Math.round(x.score*100)}%</strong><span class="muted">résonance</span></div></article>`).join('');$$('[data-feedback]').forEach(b=>b.onclick=async()=>{try{await api('/api/discovery/feedback',{method:'PUT',body:{referenceAppId:b.dataset.ref,candidateAppId:b.dataset.candidate,verdict:b.dataset.feedback}});notify('Retour mémorisé pour les prochaines découvertes.');}catch(e){notify(e.message,'error');}});root.scrollIntoView({behavior:'smooth'});}
-async function diagnostics(){try{const s=await api('/api/status');$('#diagnosticsBody').innerHTML=`<p class="eyebrow">DIAGNOSTIC</p><h1>Backlog Core ${esc(s.version)}</h1><div class="profile-grid"><div class="profile-section"><h4>Inventaire</h4><p>${s.inventory.toLocaleString('fr-FR')} jeux<br>Source : ${esc(s.importResult?.sourceTable||'non détectée')}</p></div><div class="profile-section"><h4>Connaissance IA</h4><p>${s.analyzed} profils Core<br>Historique importé : non</p></div><div class="profile-section"><h4>Modèles</h4><p>${esc(s.analysisModel)}<br>${esc(s.embeddingModel)}</p></div><div class="profile-section"><h4>Base</h4><p>Schéma backlog-core/1.0<br>État : opérationnel</p></div></div>`;$('#diagnosticsDialog').showModal();}catch(e){notify(e.message,'error');}}
-function bind(){ $$('.nav').forEach(b=>b.onclick=()=>showView(b.dataset.view));$$('.dialog-close').forEach(b=>b.onclick=()=>b.closest('dialog').close());let timer;$('#searchInput').oninput=e=>{clearTimeout(timer);timer=setTimeout(()=>{state.q=e.target.value.trim();loadGames(true);},250)};$$('[data-filter]').forEach(b=>b.onclick=()=>{$$('[data-filter]').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.filter=b.dataset.filter;loadGames(true)});$('#loadMore').onclick=()=>loadGames(false);$('#clearBatch').onclick=async()=>{await api('/api/batch',{method:'DELETE'});await loadBatch();await loadGames(true)};$('#startRun').onclick=async()=>{try{await api('/api/enrichment/start',{method:'POST',body:{}});notify('Enrichissement lancé.');setTimeout(loadRun,300);}catch(e){notify(e.message,'error')}};$('#pauseRun').onclick=async()=>{await api('/api/enrichment/pause',{method:'POST',body:{}});notify('Suspension demandée après le jeu en cours.');};$('#resumeRun').onclick=async()=>{await api('/api/enrichment/resume',{method:'POST',body:{}});setTimeout(loadRun,300)};$('#discoverBtn').onclick=discover;$('#diagnosticsBtn').onclick=diagnostics;}
-(async()=>{bind();try{await Promise.all([loadStatus(),loadGames(true)]);const initial=['library','enrichment','discovery'].includes(location.hash.slice(1))?location.hash.slice(1):'library';showView(initial);}catch(e){notify(e.message,'error');}})();
+const state = { page: 1, pages: 1, status: 'all', q: '', view: 'library', lastGamesRefresh: 0 };
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const statusLabels = {
+  idle: 'Inactive', running: 'En cours', pausing: 'Suspension…', paused: 'Suspendue',
+  completed: 'Terminée', completed_with_errors: 'Terminée avec erreurs',
+  pending: 'À enrichir', processing: 'En cours', enriched: 'Enrichi', failed: 'Erreur', completed: 'Enrichi'
+};
+
+function escapeHtml(value = '') {
+  return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+}
+
+function safeImageUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return ['http:', 'https:'].includes(url.protocol) ? escapeHtml(url.href) : '';
+  } catch { return ''; }
+}
+
+async function api(url, options = {}) {
+  const response = await fetch(url, { headers: { 'content-type': 'application/json', ...(options.headers || {}) }, ...options });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Erreur HTTP ${response.status}`);
+  return payload;
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ${seconds % 60} s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ${minutes % 60} min`;
+}
+
+function toast(message, error = false) {
+  const node = $('#toast');
+  node.textContent = message;
+  node.classList.toggle('error', error);
+  node.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { node.hidden = true; }, 4200);
+}
+
+function switchView(view) {
+  state.view = view;
+  $$('.view').forEach((node) => node.classList.toggle('active', node.id === `${view}-view`));
+  $$('.nav-link').forEach((node) => node.classList.toggle('active', node.dataset.view === view));
+  location.hash = view;
+  if (view === 'discovery') loadDiscoveryGames();
+}
+
+function updateCampaign(data) {
+  $('#service-state').textContent = 'Service disponible';
+  $('#service-state').classList.add('online');
+  $('#metric-total').textContent = data.totalGames.toLocaleString('fr-FR');
+  $('#metric-enriched').textContent = data.enriched.toLocaleString('fr-FR');
+  $('#metric-remaining').textContent = data.remaining.toLocaleString('fr-FR');
+  $('#metric-failed').textContent = data.failed.toLocaleString('fr-FR');
+  $('#progress-percent').textContent = `${data.percent.toLocaleString('fr-FR')} %`;
+  $('#progress-bar').style.width = `${Math.min(100, data.percent)}%`;
+  $('#campaign-badge').textContent = statusLabels[data.status] || data.status;
+  $('#campaign-badge').dataset.status = data.status;
+  $('#current-game').textContent = data.current_game_name || (data.status === 'completed' ? 'Bibliothèque enrichie' : 'Aucun jeu en cours');
+  $('#current-step').textContent = data.current_step ? data.current_step.replaceAll('_', ' ') : '—';
+  $('#average-time').textContent = formatDuration(data.averageMs);
+  $('#remaining-time').textContent = formatDuration(data.estimatedRemainingMs);
+  $('#start-button').hidden = !['idle', 'completed', 'completed_with_errors'].includes(data.status);
+  $('#pause-button').hidden = data.status !== 'running';
+  $('#resume-button').hidden = !['paused', 'pausing'].includes(data.status);
+  $('#retry-button').hidden = data.failed < 1 || data.status === 'running' || data.status === 'pausing';
+  const error = $('#last-error');
+  error.hidden = !data.last_error;
+  error.textContent = data.last_error ? `Dernière erreur : ${data.last_error}` : '';
+}
+
+async function refreshCampaign() {
+  try {
+    const data = await api('/api/enrichment');
+    updateCampaign(data);
+    if (Date.now() - state.lastGamesRefresh > 9000 || data.processing) await loadGames(false);
+  } catch (error) {
+    $('#service-state').textContent = 'Service indisponible';
+    $('#service-state').classList.remove('online');
+  }
+}
+
+function gameCard(game) {
+  const status = game.enrichment_status || 'pending';
+  const imageUrl = safeImageUrl(game.cover_url);
+  const cover = imageUrl
+    ? `<img src="${imageUrl}" alt="" loading="lazy">`
+    : `<div class="cover-placeholder">${escapeHtml(game.name.slice(0, 1).toUpperCase())}</div>`;
+  return `<article class="game-card" data-app-id="${game.app_id}">
+    <div class="cover">${cover}<span class="game-status status-${escapeHtml(status)}">${escapeHtml(statusLabels[status] || status)}</span></div>
+    <div class="game-copy"><h3>${escapeHtml(game.name)}</h3><p>${escapeHtml(game.developer || game.genres || 'Informations Steam')}</p>${game.error ? `<small class="card-error">${escapeHtml(game.error)}</small>` : ''}</div>
+  </article>`;
+}
+
+async function loadGames(resetPage = false) {
+  if (resetPage) state.page = 1;
+  const params = new URLSearchParams({ page: state.page, pageSize: 48, status: state.status, q: state.q });
+  const grid = $('#games-grid');
+  if (!grid.children.length) grid.innerHTML = '<p class="loading">Chargement de la bibliothèque…</p>';
+  try {
+    const data = await api(`/api/library/games?${params}`);
+    state.pages = data.pages;
+    state.page = data.page;
+    grid.innerHTML = data.items.length ? data.items.map(gameCard).join('') : '<div class="empty"><strong>Aucun jeu trouvé</strong><span>Essayez un autre filtre ou une autre recherche.</span></div>';
+    $('#page-state').textContent = `Page ${data.page} sur ${data.pages} · ${data.total.toLocaleString('fr-FR')} jeu${data.total > 1 ? 'x' : ''}`;
+    $('#previous-page').disabled = data.page <= 1;
+    $('#next-page').disabled = data.page >= data.pages;
+    state.lastGamesRefresh = Date.now();
+  } catch (error) {
+    grid.innerHTML = `<div class="empty error"><strong>Impossible de charger la bibliothèque</strong><span>${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+async function showGame(appId) {
+  try {
+    const game = await api(`/api/games/${appId}`);
+    const profile = game.profile;
+    const section = (title, values) => Array.isArray(values) && values.length ? `<section><h3>${title}</h3><ul>${values.map((value) => `<li>${escapeHtml(value)}</li>`).join('')}</ul></section>` : '';
+    $('#game-details').innerHTML = `<div class="detail-head"><p class="eyebrow">Steam AppID ${game.app_id}</p><h2>${escapeHtml(game.name)}</h2><p>${escapeHtml(game.developer || game.genres || '')}</p><span class="game-status status-${profile ? 'enriched' : (game.job_status || 'pending')}">${escapeHtml(statusLabels[profile ? 'enriched' : (game.job_status || 'pending')] || '')}</span></div>
+      ${profile ? `<div class="profile-summary"><h3>Expérience générale</h3><p>${escapeHtml(profile.summary || '')}</p></div>
+      <div class="profile-grid">${section('Actions du joueur', profile.player_actions)}${section('Intentions expérientielles', profile.experiential_intentions)}${section('Traits distinctifs', profile.distinctive_traits)}${section('Incertitudes', profile.uncertainties)}</div>
+      <p class="metadata">Pipeline ${escapeHtml(game.pipeline_version)} · ${escapeHtml(game.model)} · ${escapeHtml(game.embedding_model)}</p>` : `<div class="empty"><strong>Profil non disponible</strong><span>${escapeHtml(game.error || 'Ce jeu sera traité par la campagne globale.')}</span></div>`}`;
+    $('#game-dialog').showModal();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function campaignAction(action) {
+  try {
+    const data = await api(`/api/enrichment/${action}`, { method: 'POST', body: '{}' });
+    updateCampaign(data);
+    toast(action === 'pause' ? 'Suspension demandée après le jeu en cours.' : 'Campagne mise à jour.');
+  } catch (error) { toast(error.message, true); }
+}
+
+async function loadDiscoveryGames() {
+  const select = $('#reference-game');
+  const selected = select.value;
+  try {
+    const data = await api('/api/discovery/games?limit=250');
+    select.innerHTML = '<option value="">Aucun — partir uniquement de mon envie</option>' + data.items.map((game) => `<option value="${game.app_id}">${escapeHtml(game.name)}</option>`).join('');
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  } catch (error) { toast(error.message, true); }
+}
+
+async function discover() {
+  const motivation = $('#motivation').value.trim();
+  const referenceAppId = $('#reference-game').value || null;
+  const button = $('#discover-button');
+  const notice = $('#discovery-status');
+  button.disabled = true;
+  button.textContent = 'Recherche en cours…';
+  notice.hidden = false;
+  notice.textContent = 'Backlog confronte votre envie aux profils disponibles.';
+  $('#recommendations').innerHTML = '';
+  try {
+    const data = await api('/api/discovery/recommend', { method: 'POST', body: JSON.stringify({ motivation, referenceAppId }) });
+    notice.textContent = data.recommendations.length ? `${data.recommendations.length} résonance${data.recommendations.length > 1 ? 's' : ''} retenue${data.recommendations.length > 1 ? 's' : ''}.` : 'Aucune résonance suffisamment convaincante pour cette envie.';
+    $('#recommendations').innerHTML = data.recommendations.map((item) => `<article class="recommendation" data-app-id="${item.app_id}">
+      <div class="rec-score">${Math.round(item.score * 100)}<span>%</span></div><div><p class="eyebrow">Résonance expérientielle</p><h2>${escapeHtml(item.name)}</h2><p>${escapeHtml(item.explanation)}</p>
+      ${item.matching_motivations?.length ? `<div class="chips">${item.matching_motivations.map((value) => `<span>${escapeHtml(value)}</span>`).join('')}</div>` : ''}
+      ${item.caveats?.length ? `<p class="caveat">Réserves : ${escapeHtml(item.caveats.join(' · '))}</p>` : ''}
+      <div class="feedback"><button data-verdict="positive">Pertinent</button><button data-verdict="negative">Peu pertinent</button><button class="open-game">Voir le profil</button></div></div></article>`).join('');
+  } catch (error) {
+    notice.textContent = error.message;
+    notice.classList.add('error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Chercher des résonances';
+  }
+}
+
+async function saveFeedback(appId, verdict, button) {
+  try {
+    await api('/api/discovery/feedback', { method: 'POST', body: JSON.stringify({ appId, verdict, motivation: $('#motivation').value.trim() }) });
+    button.closest('.feedback').querySelectorAll('[data-verdict]').forEach((node) => node.classList.remove('selected'));
+    button.classList.add('selected');
+    toast('Retour mémorisé pour les prochaines recherches.');
+  } catch (error) { toast(error.message, true); }
+}
+
+$$('.nav-link').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
+$$('.filter').forEach((button) => button.addEventListener('click', () => {
+  $$('.filter').forEach((node) => node.classList.remove('active')); button.classList.add('active'); state.status = button.dataset.status; loadGames(true);
+}));
+let searchTimer;
+$('#search-input').addEventListener('input', (event) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.q = event.target.value.trim(); loadGames(true); }, 280); });
+$('#previous-page').addEventListener('click', () => { state.page -= 1; loadGames(); scrollTo({ top: 540, behavior: 'smooth' }); });
+$('#next-page').addEventListener('click', () => { state.page += 1; loadGames(); scrollTo({ top: 540, behavior: 'smooth' }); });
+$('#games-grid').addEventListener('click', (event) => { const card = event.target.closest('.game-card'); if (card) showGame(card.dataset.appId); });
+$('#game-dialog .dialog-close').addEventListener('click', () => $('#game-dialog').close());
+$('#start-button').addEventListener('click', () => campaignAction('start'));
+$('#pause-button').addEventListener('click', () => campaignAction('pause'));
+$('#resume-button').addEventListener('click', () => campaignAction('resume'));
+$('#retry-button').addEventListener('click', () => campaignAction('retry-failures'));
+$('#discover-button').addEventListener('click', discover);
+$('#recommendations').addEventListener('click', (event) => {
+  const card = event.target.closest('.recommendation'); if (!card) return;
+  if (event.target.matches('[data-verdict]')) saveFeedback(card.dataset.appId, event.target.dataset.verdict, event.target);
+  if (event.target.matches('.open-game')) showGame(card.dataset.appId);
+});
+
+switchView((location.hash || '#library').slice(1) === 'discovery' ? 'discovery' : 'library');
+loadGames();
+refreshCampaign();
+setInterval(refreshCampaign, 3000);

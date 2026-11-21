@@ -1,13 +1,15 @@
 {
   "name": "backlog-core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Backlog Core — bibliothèque Steam, enrichissement homogène et découverte expérientielle",
-  "type": "commonjs",
-  "engines": { "node": ">=22.5.0" },
+  "description": "Backlog Core — enrichissement global autonome d'une bibliothèque Steam",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/*.test.js",
-    "check": "node --check server.js && node --check lib/database.js && node --check lib/enrichment.js && node --check lib/legacy-import.js && node --check public/app.js"
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1",
+    "check": "node --check src/server.js && node --check public/app.js"
   }
 }
