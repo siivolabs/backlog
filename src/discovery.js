@@ -1,122 +1,79 @@
-import { json } from './db.js';
+import crypto from 'node:crypto';
+import { parseJson } from './db.js';
 
 function cosine(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || !a.length) return -1;
-  let dot = 0, normA = 0, normB = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    dot += a[index] * b[index];
-    normA += a[index] ** 2;
-    normB += b[index] ** 2;
+  let dot = 0, aa = 0, bb = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = Number(a[i]), y = Number(b[i]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return -1;
+    dot += x * y; aa += x * x; bb += y * y;
   }
-  return normA && normB ? dot / Math.sqrt(normA * normB) : -1;
+  return aa && bb ? dot / Math.sqrt(aa * bb) : -1;
 }
 
-const RESULT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['recommendations'],
-  properties: {
-    recommendations: {
-      type: 'array', maxItems: 5,
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['app_id', 'score', 'explanation', 'matching_motivations', 'caveats'],
-        properties: {
-          app_id: { type: 'integer' },
-          score: { type: 'number' },
-          explanation: { type: 'string' },
-          matching_motivations: { type: 'array', items: { type: 'string' }, maxItems: 5 },
-          caveats: { type: 'array', items: { type: 'string' }, maxItems: 4 }
-        }
-      }
-    }
-  }
-};
+export function motivationKey(value) {
+  return crypto.createHash('sha256').update(String(value || '').trim().toLocaleLowerCase('fr')).digest('hex').slice(0, 24);
+}
+
+function explanation(reference, candidate, motivation) {
+  const refProfile = parseJson(reference.profile_json, {});
+  const candidateProfile = parseJson(candidate.profile_json, {});
+  const refAxes = new Set(refProfile.experiential_axes || []);
+  const overlap = (candidateProfile.experiential_axes || []).filter((axis) => refAxes.has(axis)).slice(0, 3);
+  if (overlap.length) return `Résonance expérientielle : ${overlap.join(', ')}.`;
+  if (motivation) return `Ce profil se rapproche de la motivation « ${motivation.slice(0, 120)} » au-delà des genres.`;
+  return `Proximité globale avec l'expérience de ${reference.title}.`;
+}
 
 export class DiscoveryEngine {
-  constructor({ db, ollama, shortlist = 20, limit = 5, logger }) {
-    Object.assign(this, { db, ollama, shortlist, limit, logger });
+  constructor({ db, embedText }) {
+    this.db = db;
+    this.embedText = embedText;
   }
 
-  listCandidates(q = '', limit = 100) {
-    const pattern = `%${q}%`;
-    return this.db.prepare(`
-      SELECT g.app_id, g.name, g.cover_url, g.developer
-      FROM games g JOIN profiles p ON p.app_id=g.app_id
-      WHERE g.name LIKE ? ORDER BY g.name COLLATE NOCASE LIMIT ?
-    `).all(pattern, Math.min(250, Math.max(1, Number(limit) || 100)));
-  }
-
-  async recommend({ motivation, referenceAppId = null }) {
-    const text = String(motivation || '').trim();
-    if (text.length < 8) throw new Error('Décrivez votre envie en au moins 8 caractères.');
-    const queryEmbedding = await this.ollama.embed(text);
-    const reference = referenceAppId ? this.db.prepare(`
-      SELECT g.app_id, g.name, p.profile_json, p.embedding_json
-      FROM games g JOIN profiles p ON p.app_id=g.app_id WHERE g.app_id=?
-    `).get(Number(referenceAppId)) : null;
-    const referenceEmbedding = reference ? json(reference.embedding_json, []) : null;
-    const rows = this.db.prepare(`
-      SELECT g.app_id, g.name, g.cover_url, g.developer, p.profile_json, p.embedding_json
-      FROM games g JOIN profiles p ON p.app_id=g.app_id
-    `).all();
-    const feedback = new Map(this.db.prepare(`
-      SELECT app_id, SUM(CASE verdict WHEN 'positive' THEN 1 WHEN 'negative' THEN -1 ELSE 0 END) AS balance
-      FROM discovery_feedback GROUP BY app_id
-    `).all().map((row) => [Number(row.app_id), Number(row.balance || 0)]));
-    const ranked = rows.filter((row) => Number(row.app_id) !== Number(referenceAppId)).map((row) => {
-      const vector = json(row.embedding_json, []);
-      const motivationScore = cosine(queryEmbedding, vector);
-      const referenceScore = referenceEmbedding ? cosine(referenceEmbedding, vector) : motivationScore;
-      const memoryAdjustment = Math.max(-0.08, Math.min(0.05, (feedback.get(Number(row.app_id)) || 0) * 0.02));
-      return { ...row, profile: json(row.profile_json, {}), vector: undefined, embedding_json: undefined,
-        vectorScore: Math.max(-1, Math.min(1, motivationScore * 0.82 + referenceScore * 0.18 + memoryAdjustment)) };
-    }).filter((row) => Number.isFinite(row.vectorScore)).sort((a, b) => b.vectorScore - a.vectorScore).slice(0, this.shortlist);
-    if (!ranked.length) return { reference: reference ? { app_id: reference.app_id, name: reference.name } : null, recommendations: [], method: 'semantic' };
-
-    const candidates = ranked.map((row) => ({
-      app_id: row.app_id,
-      name: row.name,
-      semantic_score: Math.round(row.vectorScore * 1000) / 1000,
-      profile: row.profile
-    }));
-    const prompt = `Tu es l'unique moteur de découverte de Backlog Core. Évalue les résonances expérientielles, sans te limiter aux genres.\n` +
-      `Envie exprimée: ${text}\n` +
-      (reference ? `Jeu de référence: ${reference.name}\n` : '') +
-      `Candidats présélectionnés sémantiquement:\n${JSON.stringify(candidates)}\n\n` +
-      `Règles: retiens de 0 à ${this.limit} jeux; ne force aucun résultat; utilise uniquement les app_id fournis; score entre 0 et 1; explique précisément la résonance et les réserves.`;
-    try {
-      const evaluated = await this.ollama.generateJson(prompt, RESULT_SCHEMA);
-      const byId = new Map(ranked.map((row) => [Number(row.app_id), row]));
-      const recommendations = (evaluated.recommendations || []).map((item) => {
-        const row = byId.get(Number(item.app_id));
-        if (!row) return null;
-        return {
-          app_id: row.app_id, name: row.name, cover_url: row.cover_url, developer: row.developer,
-          score: Math.max(0, Math.min(1, Number(item.score) || 0)), explanation: item.explanation,
-          matching_motivations: item.matching_motivations || [], caveats: item.caveats || []
-        };
-      }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, this.limit);
-      return { reference: reference ? { app_id: reference.app_id, name: reference.name } : null, recommendations, method: 'semantic_and_experiential' };
-    } catch (error) {
-      this.logger.warn('Évaluation expérientielle indisponible, classement sémantique conservé', error);
+  async discover({ referenceAppId, motivationText = '', limit = 12 }) {
+    const reference = this.db.prepare(`SELECT g.*,p.profile_json,p.embedding_json FROM games g JOIN profiles p ON p.app_id=g.app_id WHERE g.app_id=?`).get(String(referenceAppId));
+    if (!reference) throw new Error('Le jeu de référence doit être enrichi.');
+    const referenceEmbedding = parseJson(reference.embedding_json, null);
+    if (!Array.isArray(referenceEmbedding)) throw new Error('Le profil de référence ne possède pas d’embedding.');
+    const motivation = String(motivationText || '').trim();
+    const motivationEmbedding = motivation ? await this.embedText(motivation) : null;
+    const key = motivationKey(motivation);
+    const feedback = new Map(this.db.prepare(`SELECT candidate_app_id,verdict FROM discovery_feedback WHERE reference_app_id=? AND motivation_key=?`).all(String(referenceAppId), key).map((row) => [row.candidate_app_id, row.verdict]));
+    const candidates = this.db.prepare(`
+      SELECT g.app_id,g.title,g.studio,g.cover_url,g.genres,p.profile_json,p.embedding_json,p.confidence
+      FROM games g JOIN profiles p ON p.app_id=g.app_id WHERE g.app_id<>?
+    `).all(String(referenceAppId));
+    const results = candidates.map((candidate) => {
+      const vector = parseJson(candidate.embedding_json, null);
+      const referenceScore = cosine(referenceEmbedding, vector);
+      const motivationScore = motivationEmbedding ? cosine(motivationEmbedding, vector) : referenceScore;
+      const verdict = feedback.get(candidate.app_id);
+      const adjustment = verdict === 'positive' ? 0.04 : verdict === 'negative' ? -0.08 : 0;
+      const score = Math.max(0, Math.min(1, 0.65 * referenceScore + 0.35 * motivationScore + adjustment));
       return {
-        reference: reference ? { app_id: reference.app_id, name: reference.name } : null,
-        recommendations: ranked.slice(0, this.limit).map((row) => ({
-          app_id: row.app_id, name: row.name, cover_url: row.cover_url, developer: row.developer,
-          score: Math.max(0, Math.min(1, row.vectorScore)),
-          explanation: 'Correspondance sémantique avec les motivations exprimées. L’explication approfondie est temporairement indisponible.',
-          matching_motivations: [], caveats: ['Évaluation IA détaillée indisponible pour cette recherche.']
-        })),
-        method: 'semantic_fallback', warning: error.message
+        app_id: candidate.app_id, title: candidate.title, studio: candidate.studio,
+        cover_url: candidate.cover_url, genres: candidate.genres,
+        score: Number(score.toFixed(4)), reference_score: Number(referenceScore.toFixed(4)),
+        motivation_score: Number(motivationScore.toFixed(4)), previous_verdict: verdict || null,
+        explanation: explanation(reference, candidate, motivation)
       };
-    }
+    }).filter((item) => Number.isFinite(item.score)).sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(50, Number(limit) || 12)));
+
+    const insert = this.db.prepare(`INSERT INTO discovery_sessions (reference_app_id,motivation_text,motivations_json,results_json) VALUES (?,?,?,?)`);
+    const saved = insert.run(String(referenceAppId), motivation, JSON.stringify({ text: motivation, key }), JSON.stringify(results));
+    return { session_id: Number(saved.lastInsertRowid), reference: { app_id: reference.app_id, title: reference.title }, motivation_key: key, results };
   }
 
-  feedback({ appId, motivation, verdict, note = null }) {
-    if (!['positive', 'negative', 'neutral'].includes(verdict)) throw new Error('Verdict invalide');
-    this.db.prepare('INSERT INTO discovery_feedback (app_id, motivation, verdict, note) VALUES (?, ?, ?, ?)')
-      .run(Number(appId), String(motivation || ''), verdict, note ? String(note) : null);
-    return { saved: true };
+  saveFeedback({ referenceAppId, candidateAppId, motivationText = '', verdict, note = null }) {
+    if (!['positive', 'negative', 'neutral'].includes(verdict)) throw new Error('Verdict invalide.');
+    const key = motivationKey(motivationText);
+    this.db.prepare(`
+      INSERT INTO discovery_feedback (reference_app_id,candidate_app_id,motivation_key,verdict,note)
+      VALUES (?,?,?,?,?) ON CONFLICT(reference_app_id,candidate_app_id,motivation_key)
+      DO UPDATE SET verdict=excluded.verdict,note=excluded.note,updated_at=datetime('now')
+    `).run(String(referenceAppId), String(candidateAppId), key, verdict, note == null ? null : String(note));
+    return { saved: true, motivation_key: key };
   }
 }

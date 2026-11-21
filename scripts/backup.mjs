@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync, backup } from 'node:sqlite';
+import { loadConfig } from '../src/config.js';
+const { databasePath } = loadConfig();
+if (!fs.existsSync(databasePath)) throw new Error(`Base introuvable : ${databasePath}`);
+const stamp = new Date().toISOString().replaceAll(':','-').replace(/\.\d{3}Z$/, 'Z');
+const destination = path.join(path.dirname(databasePath), `backlog-core.before-v1.1.2.${stamp}.sqlite`);
+const db = new DatabaseSync(databasePath);
+await backup(db, destination);
+db.close();
+console.log(destination);

@@ -1,22 +1,75 @@
 <!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Backlog Core</title><link rel="stylesheet" href="/styles.css"></head>
-<body><header><div><p class="eyebrow">BACKLOG CORE <span>V1.1.1</span></p><h1>Redécouvrir ce que vous possédez déjà.</h1></div><nav><button data-view="library" class="active">Bibliothèque & enrichissement</button><button data-view="discovery">Découverte</button></nav></header>
-<main>
-<section id="library" class="view active">
-  <div class="summary">
-    <article><span>Bibliothèque</span><strong id="gamesCount">—</strong><small>jeux préservés</small></article>
-    <article><span>Profils Core</span><strong id="enrichedCount">—</strong><small id="coverage">—</small></article>
-    <article><span>Campagne</span><strong id="campaignStatus">—</strong><small id="campaignDetail">—</small></article>
-  </div>
-  <div class="progress"><i id="progressBar"></i></div>
-  <div class="actions"><button id="start">Démarrer</button><button id="pause" class="secondary">Suspendre</button><button id="resume" class="secondary">Reprendre</button><button id="retry" class="secondary">Relancer les erreurs</button></div>
-  <div class="toolbar"><input id="search" placeholder="Rechercher un jeu, un studio ou un genre"><select id="status"><option value="all">Tous</option><option value="enriched">Enrichis</option><option value="pending">À enrichir</option><option value="failed">En erreur</option></select></div>
-  <div id="games" class="games"></div><button id="more" class="secondary">Afficher plus</button>
-</section>
-<section id="discovery" class="view">
-  <div class="panel"><p class="eyebrow">INTENTION</p><h2>Que souhaitez-vous vivre maintenant ?</h2><textarea id="motivation" placeholder="Par exemple : explorer librement, ressentir une progression claire, me laisser surprendre sans pression..."></textarea><input id="likedId" inputmode="numeric" placeholder="App ID d’un jeu apprécié (facultatif)"><button id="discover">Chercher des résonances</button></div>
-  <div id="recommendations" class="recommendations"></div>
-</section>
-</main><dialog id="detail"><button id="closeDetail" class="close">×</button><div id="detailBody"></div></dialog>
-<div id="toast" role="status"></div><script type="module" src="/app.js"></script></body></html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Backlog Core</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="shell topbar">
+    <a class="brand" href="#library" aria-label="Backlog Core"><span class="brand-mark">B</span><span>Backlog <strong>Core</strong></span></a>
+    <nav aria-label="Navigation principale">
+      <button class="nav-link active" data-view="library">Bibliothèque</button>
+      <button class="nav-link" data-view="discovery">Découverte</button>
+    </nav>
+    <span id="connection" class="connection">Connexion…</span>
+  </header>
+
+  <main class="shell">
+    <section id="view-library" class="view active">
+      <div class="hero">
+        <div><p class="eyebrow">CONNAISSANCE GLOBALE</p><h1>Votre bibliothèque, enrichie en continu.</h1><p class="subtitle">Le traitement appartient au serveur. Fermez cette page : le NAS poursuit la campagne et reprend après un redémarrage.</p></div>
+        <div class="actions">
+          <button id="start" class="primary">▶ Démarrer / reprendre</button>
+          <button id="pause" class="secondary">Ⅱ Suspendre</button>
+          <button id="retry" class="ghost">↻ Relancer les erreurs</button>
+        </div>
+      </div>
+
+      <section class="dashboard" aria-label="Progression d’enrichissement">
+        <div class="metric"><span>Inventoriés</span><strong id="m-total">—</strong></div>
+        <div class="metric good"><span>Enrichis</span><strong id="m-completed">—</strong></div>
+        <div class="metric"><span>En cours</span><strong id="m-running">—</strong></div>
+        <div class="metric bad"><span>Erreurs</span><strong id="m-errors">—</strong></div>
+        <div class="metric"><span>Restants</span><strong id="m-remaining">—</strong></div>
+      </section>
+
+      <section class="campaign-card">
+        <div class="campaign-row"><div><span id="campaign-state" class="pill">—</span><strong id="current-game">Aucun traitement actif</strong><small id="campaign-detail">Initialisation…</small></div><strong id="progress-label">0 %</strong></div>
+        <div class="progress"><span id="progress-bar"></span></div>
+      </section>
+
+      <section class="library-card">
+        <div class="toolbar">
+          <div><h2>Bibliothèque</h2><p id="result-count">Chargement…</p></div>
+          <div class="filters">
+            <input id="search" type="search" placeholder="Rechercher un titre ou un studio…" aria-label="Rechercher">
+            <select id="status-filter" aria-label="Filtrer par état">
+              <option value="all">Tous les états</option><option value="completed">Enrichis</option><option value="pending">À enrichir</option><option value="running">En cours</option><option value="error">En erreur</option>
+            </select>
+          </div>
+        </div>
+        <div id="game-grid" class="game-grid" aria-live="polite"></div>
+        <div class="pagination"><button id="previous" class="ghost">← Précédent</button><span id="page-label"></span><button id="next" class="ghost">Suivant →</button></div>
+      </section>
+    </section>
+
+    <section id="view-discovery" class="view">
+      <div class="hero compact"><div><p class="eyebrow">RÉSONANCES EXPÉRIENTIELLES</p><h1>Découvrir sans réduire les jeux à leurs genres.</h1><p class="subtitle">Chaque profil enrichi devient immédiatement un candidat. La découverte utilise le même moteur, quelle que soit la taille de la bibliothèque.</p></div></div>
+      <form id="discovery-form" class="discovery-form">
+        <label>Jeu de référence<select id="reference-game" required><option value="">Choisir un jeu enrichi…</option></select></label>
+        <label>Ce que vous cherchez maintenant<textarea id="motivation" rows="3" placeholder="Ex. Je veux retrouver une sensation d'exploration intime, sans pression constante…"></textarea></label>
+        <button class="primary" type="submit">Générer des résonances</button>
+      </form>
+      <div id="discovery-message" class="notice hidden"></div>
+      <div id="discovery-results" class="results-grid"></div>
+    </section>
+  </main>
+
+  <dialog id="profile-dialog"><button id="close-dialog" class="dialog-close" aria-label="Fermer">×</button><div id="profile-content"></div></dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

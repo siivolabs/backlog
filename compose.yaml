@@ -1,20 +1,24 @@
 services:
   backlog:
-    image: ${IMAGE_NAME:-ghcr.io/siivolabs/backlog}:${IMAGE_TAG:-latest}
-    build:
-      context: .
+    image: ${IMAGE:-ghcr.io/siivolabs/backlog:latest}
     container_name: backlog
     restart: unless-stopped
-    ports:
-      - "${PORT:-3000}:3000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       PORT: 3000
+      DATA_DIR: /data
       DATABASE_PATH: /data/backlog-core.sqlite
+      LEGACY_DATABASE_PATH: /data/backlog.sqlite
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       AI_ANALYSIS_MODEL: ${AI_ANALYSIS_MODEL:-qwen3:32b}
       AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-embeddinggemma}
-      MOCK_AI: ${MOCK_AI:-0}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-180000}
+      ENRICHMENT_RETRY_LIMIT: ${ENRICHMENT_RETRY_LIMIT:-3}
+      ENRICHMENT_LOOP_DELAY_MS: ${ENRICHMENT_LOOP_DELAY_MS:-750}
     volumes:
       - ${DATA_PATH:?Définissez DATA_PATH dans .env}:/data
+    ports:
+      - "${PORT:-3000}:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    stop_grace_period: 3m

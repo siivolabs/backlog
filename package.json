@@ -1,12 +1,16 @@
 {
   "name": "backlog-core",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "description": "Backlog Core — bibliothèque Steam, enrichissement autonome et découverte expérientielle",
+  "engines": { "node": ">=24.0.0" },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.js",
-    "verify-db": "node scripts/verify-database.mjs"
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "check": "node --check src/server.js && node --check public/app.js",
+    "preflight": "node scripts/preflight.mjs",
+    "verify-db": "node scripts/verify-db.mjs",
+    "backup": "node scripts/backup.mjs"
   }
 }

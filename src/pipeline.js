@@ -1,96 +1,64 @@
-const PROFILE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['summary', 'player_actions', 'experiential_intentions', 'distinctive_traits', 'uncertainties'],
-  properties: {
-    summary: { type: 'string' },
-    player_actions: { type: 'array', items: { type: 'string' }, maxItems: 8 },
-    experiential_intentions: { type: 'array', items: { type: 'string' }, maxItems: 8 },
-    distinctive_traits: { type: 'array', items: { type: 'string' }, maxItems: 8 },
-    uncertainties: { type: 'array', items: { type: 'string' }, maxItems: 6 }
-  }
-};
+import { parseJson } from './db.js';
 
-function stripHtml(value = '') {
-  return String(value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+function text(value) {
+  return String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-async function fetchJson(url, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`Délai Steam dépassé après ${timeoutMs} ms`)), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal, headers: { 'user-agent': 'Backlog-Core/1.1' } });
-    if (!response.ok) throw new Error(`Steam HTTP ${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function profileText(game, profile) {
-  return [
-    game.name,
-    profile.summary,
-    `Actions du joueur: ${(profile.player_actions || []).join('; ')}`,
-    `Intentions expérientielles: ${(profile.experiential_intentions || []).join('; ')}`,
-    `Traits distinctifs: ${(profile.distinctive_traits || []).join('; ')}`
-  ].filter(Boolean).join('\n');
-}
-
-export class EnrichmentPipeline {
-  constructor({ ollama, steamDetailsUrl, steamTimeoutMs, pipelineVersion = 'core-1.1' }) {
-    Object.assign(this, { ollama, steamDetailsUrl, steamTimeoutMs, pipelineVersion });
-  }
-
-  async fetchSource(game, onStep = () => {}) {
-    onStep('collecte_steam');
-    const url = new URL(this.steamDetailsUrl);
-    url.searchParams.set('appids', String(game.app_id));
-    url.searchParams.set('l', 'french');
-    url.searchParams.set('cc', 'FR');
-    let steam = null;
-    try {
-      const payload = await fetchJson(url, this.steamTimeoutMs);
-      const envelope = payload?.[String(game.app_id)];
-      if (envelope?.success && envelope.data) steam = envelope.data;
-    } catch (error) {
-      // L'inventaire reste une source exploitable; la panne Steam est conservée comme incertitude par le prompt.
-      steam = { source_error: error.message };
+export function createPipeline({ steam, ollama, analysisModel, embeddingModel }) {
+  return async function enrichGame(game, onStep = () => {}) {
+    onStep('steam');
+    let steamData = null;
+    try { steamData = await steam.appDetails(game.app_id); }
+    catch (error) {
+      if (!game.description) throw error;
     }
-    return {
+
+    const source = {
       app_id: game.app_id,
-      name: steam?.name || game.name,
-      developer: steam?.developers?.join(', ') || game.developer || null,
-      publisher: steam?.publishers?.join(', ') || null,
-      genres: steam?.genres?.map((item) => item.description) || (game.genres ? [game.genres] : []),
-      categories: steam?.categories?.map((item) => item.description) || [],
-      short_description: stripHtml(steam?.short_description || ''),
-      about_the_game: stripHtml(steam?.about_the_game || '').slice(0, 8000),
-      source_error: steam?.source_error || null
+      title: game.title,
+      studio: game.studio,
+      genres: parseJson(game.genres, game.genres),
+      description: game.description,
+      playtime_minutes: game.playtime_minutes,
+      inventory: parseJson(game.inventory_metadata_json, {}),
+      steam: steamData ? {
+        name: steamData.name,
+        developers: steamData.developers,
+        publishers: steamData.publishers,
+        genres: steamData.genres,
+        categories: steamData.categories,
+        short_description: text(steamData.short_description),
+        about_the_game: text(steamData.about_the_game),
+        release_date: steamData.release_date,
+        recommendations: steamData.recommendations
+      } : null,
+      fetched_at: new Date().toISOString()
     };
-  }
 
-  async run(game, onStep = () => {}) {
-    const source = await this.fetchSource(game, onStep);
-    onStep('analyse');
-    const prompt = `Tu produis le profil expérientiel compact et homogène d'un jeu vidéo pour Backlog Core.\n\n` +
-      `Règles:\n- Décris ce que le joueur fait et vit, pas une publicité.\n- N'invente aucun fait absent des données.\n- Place les informations ambiguës ou manquantes dans uncertainties.\n- Réponds exclusivement selon le schéma JSON demandé.\n\n` +
-      `Données de référence:\n${JSON.stringify(source, null, 2)}`;
-    const profile = await this.ollama.generateJson(prompt, PROFILE_SCHEMA);
+    onStep('analysis');
+    const profile = await ollama.profile(`Analyse l'expérience proposée par ce jeu sans inventer. Retourne un objet JSON avec exactement ces clés : summary (chaîne), experiential_axes (tableau de chaînes), player_motivations (tableau de chaînes), emotional_tone (tableau de chaînes), rhythm (chaîne), agency (chaîne), social_mode (chaîne), confidence (nombre entre 0 et 1).\nSOURCE:\n${JSON.stringify(source)}`);
+
+    const canonical = JSON.stringify({
+      title: game.title,
+      summary: profile.summary,
+      experiential_axes: profile.experiential_axes,
+      player_motivations: profile.player_motivations,
+      emotional_tone: profile.emotional_tone,
+      rhythm: profile.rhythm,
+      agency: profile.agency,
+      social_mode: profile.social_mode
+    });
     onStep('embedding');
-    const embedding = await this.ollama.embed(profileText(game, profile));
-    if (!Array.isArray(embedding) || embedding.length < 2 || embedding.some((value) => !Number.isFinite(value))) {
-      throw new Error('Embedding invalide');
-    }
-    onStep('enregistrement');
+    const embedding = await ollama.embed(canonical);
+    onStep('persist');
     return {
-      source,
-      profile,
-      embedding,
-      schemaVersion: '1.0',
-      pipelineVersion: this.pipelineVersion,
-      model: this.ollama.analysisModel,
-      embeddingModel: this.ollama.embeddingModel
+      schema_version: 'core-profile-1.0',
+      profile_json: JSON.stringify(profile),
+      embedding_json: JSON.stringify(embedding),
+      source_json: JSON.stringify(source),
+      analysis_model: analysisModel,
+      embedding_model: embeddingModel,
+      confidence: Math.max(0, Math.min(1, Number(profile.confidence) || 0))
     };
-  }
+  };
 }
