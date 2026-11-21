@@ -1,24 +1,25 @@
 import path from 'node:path';
 
-const integer = (name, fallback, minimum = 0) => {
-  const value = Number.parseInt(process.env[name] ?? String(fallback), 10);
-  if (!Number.isFinite(value) || value < minimum) throw new Error(`${name} doit être un entier >= ${minimum}`);
-  return value;
-};
+function bool(value, fallback) {
+  if (value == null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+}
 
-export function loadConfig() {
-  const dataDir = process.env.DATA_DIR || '/data';
+function number(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
+export function loadConfig(env = process.env) {
   return {
-    host: process.env.HOST || '0.0.0.0',
-    port: integer('PORT', 3000, 1),
-    databasePath: process.env.DATABASE_PATH || path.join(dataDir, 'backlog-core.sqlite'),
-    legacyDatabasePath: process.env.LEGACY_DATABASE_PATH || path.join(dataDir, 'backlog.sqlite'),
-    ollamaBaseUrl: (process.env.OLLAMA_BASE_URL || 'http://host.docker.internal:11434').replace(/\/$/, ''),
-    analysisModel: process.env.AI_ANALYSIS_MODEL || 'qwen3:32b',
-    embeddingModel: process.env.AI_EMBEDDING_MODEL || 'embeddinggemma',
-    requestTimeoutMs: integer('REQUEST_TIMEOUT_MS', 180000, 1000),
-    retryLimit: integer('ENRICHMENT_RETRY_LIMIT', 3, 1),
-    loopDelayMs: integer('ENRICHMENT_LOOP_DELAY_MS', 750, 0),
-    publicDir: path.resolve(process.cwd(), 'public')
+    version: '1.1.3',
+    port: number(env.PORT, 3000, 1, 65535),
+    databasePath: path.resolve(env.DATABASE_PATH || '/data/backlog-core.sqlite'),
+    adminToken: env.ADMIN_TOKEN || '',
+    ollamaBaseUrl: String(env.OLLAMA_BASE_URL || 'http://host.docker.internal:11434').replace(/\/$/, ''),
+    analysisModel: env.AI_ANALYSIS_MODEL || 'qwen3:32b',
+    embeddingModel: env.AI_EMBEDDING_MODEL || 'embeddinggemma',
+    steamEnrichmentEnabled: bool(env.STEAM_ENRICHMENT_ENABLED, true),
+    requestTimeoutMs: number(env.REQUEST_TIMEOUT_MS, 120000, 1000, 600000)
   };
 }

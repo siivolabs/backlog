@@ -1,68 +1,62 @@
-import { json } from './db.js';
-
-export function libraryStats(db) {
-  const counts = db.prepare(`
-    SELECT
-      COUNT(*) AS total,
-      SUM(CASE WHEN p.app_id IS NOT NULL THEN 1 ELSE 0 END) AS enriched,
-      SUM(CASE WHEN j.status = 'processing' THEN 1 ELSE 0 END) AS processing,
-      SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END) AS failed
-    FROM games g
-    LEFT JOIN profiles p ON p.app_id = g.app_id
-    LEFT JOIN enrichment_jobs j ON j.app_id = g.app_id
-  `).get();
-  const total = Number(counts.total || 0);
-  const enriched = Number(counts.enriched || 0);
-  const failed = Number(counts.failed || 0);
-  return {
-    total,
-    enriched,
-    processing: Number(counts.processing || 0),
-    failed,
-    remaining: Math.max(0, total - enriched - failed),
-    percent: total ? Math.round((enriched / total) * 10000) / 100 : 0
-  };
+export function steamCover(appId) {
+  return /^\d+$/.test(String(appId)) ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg` : null;
 }
 
-export function listGames(db, { q = '', status = 'all', page = 1, pageSize = 48 } = {}) {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 48));
+export function listLibrary(db, options = {}) {
+  const page = Math.max(1, Number(options.page) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(options.pageSize) || 48));
+  const search = String(options.search || '').trim();
+  const status = String(options.status || 'all');
   const where = [];
   const params = [];
-  if (q) {
-    where.push('(g.name LIKE ? ESCAPE \'\\\' OR COALESCE(g.developer, \'\') LIKE ? ESCAPE \'\\\')');
-    const escaped = `%${String(q).replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
-    params.push(escaped, escaped);
-  }
+  if (search) { where.push('(g.title LIKE ? COLLATE NOCASE OR g.studio LIKE ? COLLATE NOCASE)'); params.push(`%${search}%`, `%${search}%`); }
   if (status === 'enriched') where.push('p.app_id IS NOT NULL');
-  if (status === 'pending') where.push('p.app_id IS NULL AND (j.status IS NULL OR j.status = \'pending\')');
-  if (status === 'processing') where.push("j.status = 'processing'");
-  if (status === 'failed') where.push("j.status = 'failed'");
+  else if (status === 'failed') where.push("q.status='failed'");
+  else if (status === 'pending') where.push("(q.status IN ('pending','processing') OR (q.app_id IS NULL AND p.app_id IS NULL))");
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = db.prepare(`SELECT COUNT(*) AS count FROM games g LEFT JOIN profiles p ON p.app_id=g.app_id LEFT JOIN enrichment_jobs j ON j.app_id=g.app_id ${clause}`).get(...params).count;
+  const total = Number(db.prepare(`SELECT COUNT(*) count FROM games g LEFT JOIN profiles p ON CAST(p.app_id AS TEXT)=CAST(g.app_id AS TEXT) LEFT JOIN core_background_queue q ON q.app_id=CAST(g.app_id AS TEXT) ${clause}`).get(...params).count);
   const rows = db.prepare(`
-    SELECT g.app_id, g.name, g.cover_url, g.developer, g.genres, g.playtime_minutes,
-      CASE WHEN p.app_id IS NOT NULL THEN 'enriched' WHEN j.status IS NOT NULL THEN j.status ELSE 'pending' END AS enrichment_status,
-      j.current_step, j.error, p.updated_at AS enriched_at
+    SELECT g.*, CASE WHEN p.app_id IS NOT NULL THEN 1 ELSE 0 END enriched,
+      q.status enrichment_status, q.current_step, q.error, q.attempts
     FROM games g
-    LEFT JOIN profiles p ON p.app_id = g.app_id
-    LEFT JOIN enrichment_jobs j ON j.app_id = g.app_id
+    LEFT JOIN profiles p ON CAST(p.app_id AS TEXT)=CAST(g.app_id AS TEXT)
+    LEFT JOIN core_background_queue q ON q.app_id=CAST(g.app_id AS TEXT)
     ${clause}
-    ORDER BY g.name COLLATE NOCASE, g.app_id
+    ORDER BY g.title COLLATE NOCASE
     LIMIT ? OFFSET ?
-  `).all(...params, safePageSize, (safePage - 1) * safePageSize);
-  return { items: rows, page: safePage, pageSize: safePageSize, total: Number(total), pages: Math.max(1, Math.ceil(Number(total) / safePageSize)) };
+  `).all(...params, pageSize, (page - 1) * pageSize).map((row) => ({ ...row, cover_url: row.cover_url || steamCover(row.app_id) }));
+  return { items: rows, page, page_size: pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
-export function getGame(db, appId) {
-  const row = db.prepare(`
-    SELECT g.*, p.profile_json, p.source_json, p.schema_version, p.pipeline_version, p.model,
-      p.embedding_model, p.updated_at AS enriched_at, j.status AS job_status, j.current_step, j.error
-    FROM games g
-    LEFT JOIN profiles p ON p.app_id=g.app_id
-    LEFT JOIN enrichment_jobs j ON j.app_id=g.app_id
-    WHERE g.app_id=?
-  `).get(appId);
-  if (!row) return null;
-  return { ...row, profile: json(row.profile_json), source_details: json(row.source_json), profile_json: undefined, source_json: undefined };
+export function importGames(db, payload) {
+  const games = Array.isArray(payload) ? payload : payload?.response?.games || payload?.games;
+  if (!Array.isArray(games)) throw new Error('Format invalide : tableau games introuvable.');
+  const statement = db.prepare(`
+    INSERT INTO games(app_id,title,studio,genres,cover_url,description,playtime_minutes,last_played_at,inventory_metadata_json,source_table,imported_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,'steam',datetime('now'),datetime('now'))
+    ON CONFLICT(app_id) DO UPDATE SET
+      title=excluded.title,
+      studio=COALESCE(excluded.studio,games.studio), genres=COALESCE(excluded.genres,games.genres),
+      cover_url=COALESCE(excluded.cover_url,games.cover_url), description=COALESCE(excluded.description,games.description),
+      playtime_minutes=COALESCE(excluded.playtime_minutes,games.playtime_minutes),
+      last_played_at=COALESCE(excluded.last_played_at,games.last_played_at),
+      inventory_metadata_json=excluded.inventory_metadata_json, updated_at=datetime('now')
+  `);
+  let imported = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const item of games) {
+      const appId = String(item.app_id ?? item.appid ?? '').trim();
+      const title = String(item.title ?? item.name ?? '').trim();
+      if (!appId || !title) continue;
+      const cover = item.cover_url || (/^\d+$/.test(appId) ? `https://cdn.akamai.steamstatic.com/steam/apps/${appId}/header.jpg` : null);
+      statement.run(appId, title, item.studio || item.developer || null, Array.isArray(item.genres) ? item.genres.join(', ') : item.genres || null, cover, item.description || null, item.playtime_minutes ?? item.playtime_forever ?? null, item.last_played_at || null, JSON.stringify(item));
+      imported += 1;
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
+  }
+  return { imported, received: games.length };
 }

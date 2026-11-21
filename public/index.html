@@ -6,70 +6,72 @@
   <meta name="color-scheme" content="dark">
   <title>Backlog Core</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" type="module"></script>
 </head>
 <body>
-  <header class="shell topbar">
-    <a class="brand" href="#library" aria-label="Backlog Core"><span class="brand-mark">B</span><span>Backlog <strong>Core</strong></span></a>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="topbar">
+    <a class="brand" href="#library" aria-label="Backlog Core"><span class="brand-mark">B</span><span><strong>Backlog</strong><small>CORE <span id="version"></span></small></span></a>
     <nav aria-label="Navigation principale">
-      <button class="nav-link active" data-view="library">Bibliothèque</button>
-      <button class="nav-link" data-view="discovery">Découverte</button>
+      <button class="nav-button active" data-view="library">Bibliothèque</button>
+      <button class="nav-button" data-view="discovery">Découverte</button>
     </nav>
-    <span id="connection" class="connection">Connexion…</span>
+    <button id="adminButton" class="token-button"><span class="lock">◆</span> Jeton administrateur</button>
   </header>
 
-  <main class="shell">
-    <section id="view-library" class="view active">
+  <main>
+    <section id="libraryView" class="view active">
       <div class="hero">
-        <div><p class="eyebrow">CONNAISSANCE GLOBALE</p><h1>Votre bibliothèque, enrichie en continu.</h1><p class="subtitle">Le traitement appartient au serveur. Fermez cette page : le NAS poursuit la campagne et reprend après un redémarrage.</p></div>
-        <div class="actions">
-          <button id="start" class="primary">▶ Démarrer / reprendre</button>
-          <button id="pause" class="secondary">Ⅱ Suspendre</button>
-          <button id="retry" class="ghost">↻ Relancer les erreurs</button>
-        </div>
+        <div><p class="eyebrow">BIBLIOTHÈQUE STEAM</p><h1>Votre collection, <span>pleinement comprise.</span></h1><p class="lead">Backlog enrichit chaque jeu en arrière-plan. Vous pouvez fermer cette page&nbsp;: le traitement continue dans Docker.</p></div>
+        <div class="hero-actions"><input id="inventoryFile" class="hidden" type="file" accept="application/json,.json,.txt"><button id="importButton" class="secondary">Importer l’inventaire</button><button id="campaignAction" class="primary">Lancer l’enrichissement</button><button id="retryButton" class="secondary hidden">Relancer les erreurs</button></div>
       </div>
 
-      <section class="dashboard" aria-label="Progression d’enrichissement">
-        <div class="metric"><span>Inventoriés</span><strong id="m-total">—</strong></div>
-        <div class="metric good"><span>Enrichis</span><strong id="m-completed">—</strong></div>
-        <div class="metric"><span>En cours</span><strong id="m-running">—</strong></div>
-        <div class="metric bad"><span>Erreurs</span><strong id="m-errors">—</strong></div>
-        <div class="metric"><span>Restants</span><strong id="m-remaining">—</strong></div>
-      </section>
-
-      <section class="campaign-card">
-        <div class="campaign-row"><div><span id="campaign-state" class="pill">—</span><strong id="current-game">Aucun traitement actif</strong><small id="campaign-detail">Initialisation…</small></div><strong id="progress-label">0 %</strong></div>
-        <div class="progress"><span id="progress-bar"></span></div>
-      </section>
-
-      <section class="library-card">
-        <div class="toolbar">
-          <div><h2>Bibliothèque</h2><p id="result-count">Chargement…</p></div>
-          <div class="filters">
-            <input id="search" type="search" placeholder="Rechercher un titre ou un studio…" aria-label="Rechercher">
-            <select id="status-filter" aria-label="Filtrer par état">
-              <option value="all">Tous les états</option><option value="completed">Enrichis</option><option value="pending">À enrichir</option><option value="running">En cours</option><option value="error">En erreur</option>
-            </select>
-          </div>
+      <section class="campaign-panel" aria-labelledby="campaignTitle">
+        <div class="campaign-heading"><div><p class="eyebrow">ENRICHISSEMENT GLOBAL</p><h2 id="campaignTitle">Progression de la bibliothèque</h2></div><span id="campaignBadge" class="badge idle">Inactif</span></div>
+        <div class="metrics">
+          <article><span>Jeux inventoriés</span><strong id="gamesCount">—</strong></article>
+          <article><span>Jeux enrichis</span><strong id="enrichedCount">—</strong></article>
+          <article><span>En cours</span><strong id="processingCount">—</strong></article>
+          <article><span>En erreur</span><strong id="failedCount">—</strong></article>
+          <article><span>Restants</span><strong id="remainingCount">—</strong></article>
         </div>
-        <div id="game-grid" class="game-grid" aria-live="polite"></div>
-        <div class="pagination"><button id="previous" class="ghost">← Précédent</button><span id="page-label"></span><button id="next" class="ghost">Suivant →</button></div>
+        <div class="progress-meta"><span id="currentStep">Prêt</span><strong id="progressText">0 %</strong></div>
+        <div class="progress-track"><div id="progressBar"></div></div>
+        <p class="subtle">La pause prend effet après le jeu en cours. L’état et la file sont conservés dans SQLite et repris après un redémarrage.</p>
+      </section>
+
+      <section class="library-section">
+        <div class="section-header"><div><p class="eyebrow">VOS JEUX</p><h2>Bibliothèque</h2></div><label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Rechercher un jeu ou un studio"></label></div>
+        <div class="filter-row" role="group" aria-label="Filtres"><button class="filter active" data-status="all">Tous</button><button class="filter" data-status="enriched">Enrichis</button><button class="filter" data-status="pending">À enrichir</button><button class="filter" data-status="failed">En erreur</button><span id="resultCount"></span></div>
+        <div id="gameGrid" class="game-grid" aria-live="polite"></div>
+        <div class="pagination"><button id="previousPage" class="secondary">Précédent</button><span id="pageText"></span><button id="nextPage" class="secondary">Suivant</button></div>
+      </section>
+
+      <section class="errors-section" aria-labelledby="errorsTitle">
+        <div class="section-header"><div><p class="eyebrow">SUPERVISION</p><h2 id="errorsTitle">Suivi des erreurs</h2></div><button id="refreshErrors" class="secondary">Actualiser</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Jeu</th><th>Tentatives</th><th>Dernière erreur</th><th>Date</th></tr></thead><tbody id="errorsBody"><tr><td colspan="4" class="empty">Aucune erreur signalée.</td></tr></tbody></table></div>
       </section>
     </section>
 
-    <section id="view-discovery" class="view">
-      <div class="hero compact"><div><p class="eyebrow">RÉSONANCES EXPÉRIENTIELLES</p><h1>Découvrir sans réduire les jeux à leurs genres.</h1><p class="subtitle">Chaque profil enrichi devient immédiatement un candidat. La découverte utilise le même moteur, quelle que soit la taille de la bibliothèque.</p></div></div>
-      <form id="discovery-form" class="discovery-form">
-        <label>Jeu de référence<select id="reference-game" required><option value="">Choisir un jeu enrichi…</option></select></label>
-        <label>Ce que vous cherchez maintenant<textarea id="motivation" rows="3" placeholder="Ex. Je veux retrouver une sensation d'exploration intime, sans pression constante…"></textarea></label>
-        <button class="primary" type="submit">Générer des résonances</button>
-      </form>
-      <div id="discovery-message" class="notice hidden"></div>
-      <div id="discovery-results" class="results-grid"></div>
+    <section id="discoveryView" class="view">
+      <div class="hero compact"><div><p class="eyebrow">DÉCOUVERTE</p><h1>Retrouvez l’expérience <span>qui vous appelle.</span></h1><p class="lead">Partez d’un jeu connu ou exprimez une motivation. Les résultats utilisent vos profils Core et vos corrections existantes.</p></div></div>
+      <section class="discovery-form panel">
+        <label>Jeu de référence<input id="referenceInput" list="gameSuggestions" placeholder="AppID ou titre exact"><datalist id="gameSuggestions"></datalist></label>
+        <label>Ce que vous recherchez<textarea id="motivationInput" rows="3" placeholder="Ex. une exploration calme, mystérieuse et peu directive"></textarea></label>
+        <button id="discoverButton" class="primary">Explorer ma bibliothèque</button>
+      </section>
+      <div id="discoveryResults" class="game-grid discovery-grid"></div>
     </section>
   </main>
 
-  <dialog id="profile-dialog"><button id="close-dialog" class="dialog-close" aria-label="Fermer">×</button><div id="profile-content"></div></dialog>
-  <div id="toast" class="toast" role="status"></div>
-  <script type="module" src="/app.js"></script>
+  <dialog id="tokenDialog">
+    <form method="dialog" id="tokenForm">
+      <div class="dialog-icon">◆</div><p class="eyebrow">ACCÈS PROTÉGÉ</p><h2>Jeton administrateur</h2><p>Le jeton est requis pour importer, enrichir, suspendre, reprendre ou enregistrer une correction. Il reste uniquement dans cette session de navigateur.</p>
+      <label>Jeton<input id="tokenInput" type="password" autocomplete="current-password" required placeholder="ADMIN_TOKEN"></label>
+      <p id="tokenError" class="form-error"></p>
+      <div class="dialog-actions"><button type="button" id="tokenCancel" class="secondary">Consulter seulement</button><button type="submit" class="primary">Valider</button></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

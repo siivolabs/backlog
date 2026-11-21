@@ -1,10 +1,14 @@
-# Journal des changements
+# Journal des versions
 
-## 1.1.2
+## 1.1.3
 
-- Retour strict au contrat SQLite V1.0 (`games.app_id TEXT`, `title`, `studio`).
-- Conservation directe des tables et données `profiles`, `discovery_feedback` et `discovery_sessions`.
-- Ajout exclusivement additif de deux tables isolées pour l'état de l'enrichissement autonome.
-- File globale côté serveur, pause, reprise Docker, erreurs isolées et nouvelle tentative explicite.
-- Fusion Bibliothèque/Enrichissement et maintien d'un seul moteur de découverte.
-- Aucun catalogue externe et aucune sélection manuelle.
+- Retour à l'identité visuelle bleue et aux comportements Backlog Core V1.0.
+- Utilisation directe et non destructive du schéma SQLite V1.0.
+- Restauration des couvertures avec repli vers la jaquette Steam.
+- Restauration de la saisie et de la vérification du jeton administrateur.
+- Fusion Bibliothèque/Enrichissement.
+- Campagne globale côté serveur, persistante, suspendable et reprise après redémarrage.
+- Suivi détaillé et relance des erreurs.
+- Conservation des profils, sessions et corrections de Découverte.
+- Nettoyage des anciens tests CommonJS; suite unique `tests/` sous Node 24.
+- Workflow GitHub Actions/GHCR et Compose Dockge inclus.

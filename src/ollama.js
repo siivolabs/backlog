@@ -1,57 +1,56 @@
-async function requestJson(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`Délai dépassé après ${timeoutMs} ms`)), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 500)}`);
-    return text ? JSON.parse(text) : {};
-  } finally {
-    clearTimeout(timer);
-  }
+function withTimeout(timeoutMs) {
+  return AbortSignal.timeout(timeoutMs);
 }
 
-export class OllamaClient {
-  constructor({ baseUrl, analysisModel, embeddingModel, timeoutMs, numPredict, temperature }) {
-    Object.assign(this, { baseUrl, analysisModel, embeddingModel, timeoutMs, numPredict, temperature });
-  }
+async function requestJson(url, options, timeoutMs) {
+  const response = await fetch(url, { ...options, signal: withTimeout(timeoutMs) });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 300)}`);
+  try { return JSON.parse(text); } catch { throw new Error(`Réponse JSON invalide de ${url}`); }
+}
 
-  async generateJson(prompt, schema) {
-    const data = await requestJson(`${this.baseUrl}/api/generate`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: this.analysisModel,
-        prompt,
-        stream: false,
-        format: schema,
-        options: { temperature: this.temperature, num_predict: this.numPredict }
-      })
-    }, this.timeoutMs);
-    if (!data.response) throw new Error('Ollama n’a renvoyé aucun contenu d’analyse');
-    try { return JSON.parse(data.response); }
-    catch { throw new Error(`Réponse JSON invalide du modèle: ${String(data.response).slice(0, 400)}`); }
-  }
+export async function fetchSteamDetails(appId, config) {
+  if (!config.steamEnrichmentEnabled) return null;
+  const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(appId)}&l=french`;
+  const payload = await requestJson(url, { headers: { accept: 'application/json' } }, Math.min(config.requestTimeoutMs, 30000));
+  return payload?.[String(appId)]?.success ? payload[String(appId)].data : null;
+}
 
-  async embed(input) {
-    const inputs = Array.isArray(input) ? input : [input];
-    try {
-      const data = await requestJson(`${this.baseUrl}/api/embed`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: this.embeddingModel, input: inputs })
-      }, this.timeoutMs);
-      if (!Array.isArray(data.embeddings) || !Array.isArray(data.embeddings[0])) throw new Error('Embeddings absents');
-      return Array.isArray(input) ? data.embeddings : data.embeddings[0];
-    } catch (primaryError) {
-      if (inputs.length !== 1) throw primaryError;
-      const legacy = await requestJson(`${this.baseUrl}/api/embeddings`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: this.embeddingModel, prompt: inputs[0] })
-      }, this.timeoutMs);
-      if (!Array.isArray(legacy.embedding)) throw primaryError;
-      return legacy.embedding;
-    }
+export async function generateProfile(source, config) {
+  const prompt = `Tu analyses une expérience de jeu, sans recommander d'achat. Réponds en JSON strict.\n\nDonnées source:\n${JSON.stringify(source)}\n\nStructure attendue:\n{"summary":"...","motivations":[{"key":"...","label":"...","weight":0.0,"evidence":"..."}],"pace":"...","challenge":"...","agency":"...","social":"...","tone":"...","confidence":0.0}`;
+  const body = {
+    model: config.analysisModel,
+    stream: false,
+    format: 'json',
+    messages: [
+      { role: 'system', content: 'Tu produis des profils expérientiels de jeux factuels, compacts et homogènes. Aucun commentaire hors JSON.' },
+      { role: 'user', content: prompt }
+    ],
+    options: { temperature: 0.2 }
+  };
+  const payload = await requestJson(`${config.ollamaBaseUrl}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+  }, config.requestTimeoutMs);
+  const content = payload?.message?.content;
+  if (!content) throw new Error('Ollama n’a retourné aucun profil.');
+  try { return JSON.parse(content); } catch { throw new Error('Le profil Ollama n’est pas un JSON valide.'); }
+}
+
+export async function embedText(input, config) {
+  try {
+    const payload = await requestJson(`${config.ollamaBaseUrl}/api/embed`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: config.embeddingModel, input })
+    }, config.requestTimeoutMs);
+    const vector = payload?.embeddings?.[0];
+    if (!Array.isArray(vector) || !vector.length) throw new Error('Embedding vide.');
+    return vector;
+  } catch (primary) {
+    const payload = await requestJson(`${config.ollamaBaseUrl}/api/embeddings`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: config.embeddingModel, prompt: input })
+    }, config.requestTimeoutMs).catch(() => { throw primary; });
+    if (!Array.isArray(payload?.embedding) || !payload.embedding.length) throw primary;
+    return payload.embedding;
   }
 }

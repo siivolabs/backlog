@@ -6,15 +6,14 @@ COPY . .
 RUN npm test && npm run check
 
 FROM node:24-alpine AS runtime
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 DATA_DIR=/data
+ENV NODE_ENV=production PORT=3000 DATABASE_PATH=/data/backlog-core.sqlite
 WORKDIR /app
-COPY --from=test /app/package*.json ./
-COPY --from=test /app/src ./src
-COPY --from=test /app/public ./public
-COPY --from=test /app/scripts ./scripts
-RUN mkdir -p /data && chown -R node:node /app /data
+COPY --from=test --chown=node:node /app/package*.json ./
+COPY --from=test --chown=node:node /app/src ./src
+COPY --from=test --chown=node:node /app/public ./public
+COPY --from=test --chown=node:node /app/scripts ./scripts
+RUN mkdir -p /data && chown node:node /data
 USER node
 EXPOSE 3000
-VOLUME ["/data"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1
 CMD ["node", "src/server.js"]
