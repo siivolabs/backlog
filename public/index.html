@@ -1,77 +1,22 @@
 <!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <title>Backlog Core</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-  <header class="topbar">
-    <a class="brand" href="#library" aria-label="Backlog Core">
-      <span class="brand-mark">B</span><span><strong>Backlog</strong><small>Core 1.1</small></span>
-    </a>
-    <nav aria-label="Navigation principale">
-      <button class="nav-link active" data-view="library">Bibliothèque</button>
-      <button class="nav-link" data-view="discovery">Découverte</button>
-    </nav>
-    <span id="service-state" class="service-state">Connexion…</span>
-  </header>
-
-  <main>
-    <section id="library-view" class="view active">
-      <div class="hero">
-        <div><p class="eyebrow">Inventaire & enrichissement global</p><h1>Votre bibliothèque, progressivement comprise.</h1><p class="lede">Le serveur enrichit chaque jeu avec le même pipeline. Vous pouvez fermer cette page : la campagne continue dans le conteneur.</p></div>
-        <div class="hero-actions">
-          <button id="start-button" class="button primary">Démarrer l’enrichissement</button>
-          <button id="pause-button" class="button secondary" hidden>Suspendre</button>
-          <button id="resume-button" class="button secondary" hidden>Reprendre</button>
-          <button id="retry-button" class="button ghost" hidden>Relancer les échecs</button>
-        </div>
-      </div>
-
-      <section class="panel progress-panel" aria-labelledby="progress-title">
-        <div class="panel-head"><div><p class="eyebrow">Campagne serveur</p><h2 id="progress-title">Progression globale</h2></div><span id="campaign-badge" class="badge">Inactive</span></div>
-        <div class="metrics">
-          <article><strong id="metric-total">—</strong><span>jeux inventoriés</span></article>
-          <article><strong id="metric-enriched">—</strong><span>enrichis</span></article>
-          <article><strong id="metric-remaining">—</strong><span>restants</span></article>
-          <article><strong id="metric-failed">—</strong><span>en erreur</span></article>
-        </div>
-        <div class="progress-row"><div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div><strong id="progress-percent">0 %</strong></div>
-        <div class="activity-grid">
-          <div><span>Activité</span><strong id="current-game">Aucune campagne active</strong><small id="current-step">—</small></div>
-          <div><span>Durée moyenne</span><strong id="average-time">—</strong><small>par jeu terminé</small></div>
-          <div><span>Estimation restante</span><strong id="remaining-time">—</strong><small>mise à jour automatiquement</small></div>
-        </div>
-        <p id="last-error" class="error-line" hidden></p>
-      </section>
-
-      <section class="library-tools">
-        <div class="search"><label for="search-input">Rechercher</label><input id="search-input" type="search" placeholder="Titre ou studio…"></div>
-        <div class="filters" role="group" aria-label="Filtrer par état">
-          <button class="filter active" data-status="all">Tous</button><button class="filter" data-status="enriched">Enrichis</button><button class="filter" data-status="pending">À enrichir</button><button class="filter" data-status="processing">En cours</button><button class="filter" data-status="failed">Erreurs</button>
-        </div>
-      </section>
-      <div id="games-grid" class="games-grid" aria-live="polite"></div>
-      <div class="pagination"><button id="previous-page" class="button ghost">Précédent</button><span id="page-state">Page 1</span><button id="next-page" class="button ghost">Suivant</button></div>
-    </section>
-
-    <section id="discovery-view" class="view">
-      <div class="hero compact"><div><p class="eyebrow">Moteur unique de découverte</p><h1>Qu’avez-vous envie de vivre ?</h1><p class="lede">Chaque profil terminé est immédiatement disponible ici, sans reconstruction de réseau.</p></div></div>
-      <section class="panel discovery-form">
-        <label for="reference-game">Jeu de référence <span>(facultatif)</span></label><select id="reference-game"><option value="">Aucun — partir uniquement de mon envie</option></select>
-        <label for="motivation">Votre envie</label><textarea id="motivation" rows="5" placeholder="Ex. Je veux découvrir progressivement la logique d’un univers étrange, avec un vrai sentiment d’autonomie…"></textarea>
-        <button id="discover-button" class="button primary">Chercher des résonances</button>
-      </section>
-      <div id="discovery-status" class="notice" hidden></div>
-      <div id="recommendations" class="recommendations"></div>
-    </section>
-  </main>
-
-  <dialog id="game-dialog"><button class="dialog-close" aria-label="Fermer">×</button><div id="game-details"></div></dialog>
-  <div id="toast" class="toast" hidden></div>
-  <script type="module" src="/app.js"></script>
-</body>
-</html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Backlog Core</title><link rel="stylesheet" href="/styles.css"></head>
+<body><header><div><p class="eyebrow">BACKLOG CORE <span>V1.1.1</span></p><h1>Redécouvrir ce que vous possédez déjà.</h1></div><nav><button data-view="library" class="active">Bibliothèque & enrichissement</button><button data-view="discovery">Découverte</button></nav></header>
+<main>
+<section id="library" class="view active">
+  <div class="summary">
+    <article><span>Bibliothèque</span><strong id="gamesCount">—</strong><small>jeux préservés</small></article>
+    <article><span>Profils Core</span><strong id="enrichedCount">—</strong><small id="coverage">—</small></article>
+    <article><span>Campagne</span><strong id="campaignStatus">—</strong><small id="campaignDetail">—</small></article>
+  </div>
+  <div class="progress"><i id="progressBar"></i></div>
+  <div class="actions"><button id="start">Démarrer</button><button id="pause" class="secondary">Suspendre</button><button id="resume" class="secondary">Reprendre</button><button id="retry" class="secondary">Relancer les erreurs</button></div>
+  <div class="toolbar"><input id="search" placeholder="Rechercher un jeu, un studio ou un genre"><select id="status"><option value="all">Tous</option><option value="enriched">Enrichis</option><option value="pending">À enrichir</option><option value="failed">En erreur</option></select></div>
+  <div id="games" class="games"></div><button id="more" class="secondary">Afficher plus</button>
+</section>
+<section id="discovery" class="view">
+  <div class="panel"><p class="eyebrow">INTENTION</p><h2>Que souhaitez-vous vivre maintenant ?</h2><textarea id="motivation" placeholder="Par exemple : explorer librement, ressentir une progression claire, me laisser surprendre sans pression..."></textarea><input id="likedId" inputmode="numeric" placeholder="App ID d’un jeu apprécié (facultatif)"><button id="discover">Chercher des résonances</button></div>
+  <div id="recommendations" class="recommendations"></div>
+</section>
+</main><dialog id="detail"><button id="closeDetail" class="close">×</button><div id="detailBody"></div></dialog>
+<div id="toast" role="status"></div><script type="module" src="/app.js"></script></body></html>

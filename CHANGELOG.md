@@ -1,13 +1,11 @@
-# Journal des modifications
+# Journal des versions
 
-## 1.1.0
+## 1.1.1
 
-- Suppression de toute sélection manuelle et de la limite fonctionnelle de 50 jeux.
-- Fusion de Bibliothèque et Enrichissement.
-- Orchestrateur serveur séquentiel persistant dans SQLite.
-- Démarrage, suspension après le jeu courant, reprise et relance des seuls échecs.
-- Reprise automatique des campagnes actives après redémarrage du conteneur.
-- Isolation des erreurs par jeu et non-retraitement des profils déjà prêts.
-- Disponibilité immédiate des profils dans le moteur unique de Découverte.
-- Progression globale, activité actuelle, estimation restante et états par jeu.
-- Livraison GitHub Actions/GHCR/Dockge, sans déploiement distant.
+- Correction de la migration `games` V1.0 (`title`, `studio`, App ID texte) vers V1.1.
+- Sauvegarde automatique cohérente avant conversion.
+- Conservation des métadonnées d’inventaire, descriptions et dates historiques.
+- Adaptation additive des profils, campagnes, tâches et retours de découverte.
+- Contrôles SQLite et journal de compatibilité.
+- Tests de migration répétée, d’annulation et de traitement autonome.
+- Livrable Docker/GitHub Actions/GHCR/Dockge complet.

@@ -1,172 +1,129 @@
-# Backlog Core 1.1 — enrichissement global autonome
+# Backlog Core V1.1.1
 
-Backlog Core transforme progressivement **toute la bibliothèque Steam possédée** en un catalogue expérientiel exploitable par un moteur de découverte unique.
+Correctif de compatibilité SQLite entre Backlog Core V1.0 et V1.1. Cette version conserve la bibliothèque, les profils Core, les motivations et les corrections, puis permet à l’enrichissement global de continuer côté serveur.
 
-Cette version supprime entièrement la sélection de jeux et fusionne la bibliothèque et l’enrichissement dans une même page. Le navigateur sert uniquement à observer et à piloter : la campagne tourne **côté serveur**, dans le conteneur, et continue quand la page ou le PC de consultation sont fermés.
+## Correction principale
 
-## Ce qui change en 1.1
+Une base V1.0 peut contenir `games.app_id TEXT`, `title` et `studio`, tandis que V1.1 utilisait directement `app_id INTEGER`, `name` et `developer`. `CREATE TABLE IF NOT EXISTS` ne transformant jamais une table existante, la création de l’index `games(name)` interrompait le démarrage.
 
-- Deux pages principales seulement : **Bibliothèque** et **Découverte**.
-- Liste complète des jeux et progression globale au même endroit.
-- Un seul bouton de démarrage pour tous les jeux non enrichis.
-- Suspension après le jeu courant, reprise et relance séparée des échecs.
-- État, file, profils et erreurs persistés dans SQLite.
-- Reprise automatique d’une campagne `running` après redémarrage Docker.
-- Une erreur locale n’arrête pas la campagne globale.
-- Un profil validé n’est jamais recalculé par une campagne normale.
-- Chaque profil terminé devient immédiatement disponible dans Découverte.
-- Un seul pipeline d’enrichissement et un seul moteur de découverte.
-- Aucun catalogue externe, aucun réseau permanent de paires, aucun nouvel onglet.
+V1.1.1 effectue désormais, avant la création des index :
 
-## Architecture
+1. détection du schéma réel ;
+2. sauvegarde SQLite cohérente `backlog-core.pre-v1.1.1-*.sqlite` ;
+3. validation de tous les App ID ;
+4. conversion transactionnelle de `games` ;
+5. conservation des colonnes V1.0 et ajout des colonnes V1.1 ;
+6. mise en compatibilité non destructive des tables Core ;
+7. `quick_check` et `foreign_key_check` avant validation ;
+8. journalisation dans `schema_migrations` (`10101`).
 
-```text
-Navigateur (observation/commandes)
-              │
-              ▼
-Serveur Node.js ─── API Bibliothèque + Découverte
-              │
-              ├── Orchestrateur persistant séquentiel
-              │      ├── Steam App Details
-              │      ├── Qwen : profil expérientiel compact
-              │      └── EmbeddingGemma : vecteur du profil
-              │
-              └── /data/backlog-core.sqlite
-                     ├── inventaire importé
-                     ├── file et campagne
-                     ├── profils et embeddings
-                     └── retours de découverte
+La migration est réexécutable. Un second lancement ne recrée pas la sauvegarde et ne duplique aucune donnée.
+
+## Données conservées
+
+- jeux, couvertures, genres, descriptions, temps de jeu et dernière utilisation ;
+- `inventory_metadata_json`, `source_table`, dates d’import et de mise à jour ;
+- profils, sources, embeddings et versions de pipeline déjà générés ;
+- campagne et tâches d’enrichissement ;
+- motivations, sessions de découverte, verdicts et notes correctives ;
+- données héritées des tables `enrichment_items`, `enrichment_runs`, `meta` et `work_batch`.
+
+Les tables héritées qui ne sont plus utilisées par le moteur V1.1 restent présentes et intactes. Leur état est enregistré dans `migration_compatibility` pour diagnostic.
+
+## Déploiement GitHub → GHCR → Dockge
+
+### 1. Déposer le projet sur GitHub
+
+Copiez le contenu de ce dossier à la racine du dépôt `siivolabs/backlog`, puis poussez sur `main`. Le workflow :
+
+- exécute les tests sous Node.js 24 ;
+- construit les images `linux/amd64` et `linux/arm64` ;
+- publie `ghcr.io/<propriétaire>/backlog:latest`.
+
+Si le paquet GHCR est privé, Dockge doit être authentifié auprès de `ghcr.io`.
+
+### 2. Préparer Dockge
+
+```sh
+cp .env.example .env
 ```
 
-Le traitement est volontairement séquentiel pour ne pas saturer Ollama. La page interroge l’API toutes les trois secondes ; fermer la page n’a aucun effet sur le worker serveur.
-
-## Données et migration
-
-Au premier démarrage, si la nouvelle base est vide, Core inspecte automatiquement `/data/backlog.sqlite`, identifie la table d’inventaire compatible et importe uniquement :
-
-- AppID Steam ;
-- titre ;
-- couverture, studio, genres et temps de jeu lorsqu’ils existent.
-
-Il **n’importe aucun ancien profil IA, embedding, réseau ou score**. La base historique reste inchangée. Les nouvelles données sont écrites dans `/data/backlog-core.sqlite`.
-
-L’importeur reconnaît plusieurs variantes usuelles de colonnes (`app_id`, `appid`, `steam_app_id`, `name`, `title`, `header_image`, etc.). Si aucune table compatible n’est trouvée, l’application démarre avec un inventaire vide et l’indique dans les journaux.
-
-## Prérequis
-
-- Un NAS ou serveur compatible Docker/Dockge.
-- Le dossier de données historique contenant `backlog.sqlite`.
-- Ollama accessible depuis le conteneur.
-- Les modèles configurés, par défaut `qwen3:32b` et `embeddinggemma`.
-- Pour GHCR : un dépôt GitHub et GitHub Actions activé.
-
-## Publication via GitHub et GHCR
-
-1. Décompressez l’archive dans votre dépôt GitHub, par exemple `siivolabs/backlog-core`.
-2. Poussez les fichiers sur la branche `main`.
-3. Le workflow `.github/workflows/publish-ghcr.yml` exécute les tests puis publie :
-   - `ghcr.io/<propriétaire>/<dépôt>:latest` ;
-   - `ghcr.io/<propriétaire>/<dépôt>:sha-…` ;
-   - un tag `v…` si vous poussez un tag Git.
-4. Si le paquet GHCR est privé, connectez Dockge au registre avec un PAT GitHub disposant de `read:packages`.
-
-Le workflow construit les architectures `linux/amd64` et `linux/arm64`.
-
-## Déploiement via Dockge
-
-Aucun déploiement n’est effectué par ce livrable.
-
-1. Copiez `compose.yml` et `.env.example` dans la pile Dockge.
-2. Renommez `.env.example` en `.env`.
-3. Réglez au minimum :
+Définissez au minimum :
 
 ```dotenv
-BACKLOG_IMAGE=ghcr.io/siivolabs/backlog:latest
-DATA_PATH=/volume1/docker/backlog/data
+DATA_PATH=/chemin/absolu/vers/le/dossier/contenant/backlog-core.sqlite
+IMAGE_NAME=ghcr.io/siivolabs/backlog
+IMAGE_TAG=latest
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 AI_ANALYSIS_MODEL=qwen3:32b
 AI_EMBEDDING_MODEL=embeddinggemma
 ```
 
-4. Vérifiez que l’utilisateur UID 1000 du conteneur peut lire `backlog.sqlite` et écrire dans `DATA_PATH`.
-5. Lancez localement, si possible :
+`DATA_PATH` doit viser le dossier existant, pas le fichier SQLite lui-même.
 
-```bash
-cp .env.example .env
-# modifier .env
+### 3. Prévol et sauvegarde
+
+```sh
 ./scripts/preflight.sh
-./scripts/backup-data.sh
 ```
 
-6. Dans Dockge, faites **Pull**, puis **Up**.
-7. Ouvrez `http://ADRESSE_DU_NAS:3000`.
-8. Vérifiez le nombre de jeux et quelques titres avant de démarrer l’enrichissement.
+Ce script vérifie le volume et valide le Compose. La migration crée automatiquement une sauvegarde SQLite cohérente juste avant toute conversion. Pour utiliser `scripts/backup.sh`, arrêtez d’abord le conteneur afin de ne pas copier une base active en mode WAL.
 
-### Conservation de l’ancienne installation
+### 4. Déployer
 
-Le nom de conteneur par défaut est `backlog-core`. Si l’ancien conteneur utilise déjà ce nom ou le port 3000, changez `CONTAINER_NAME` ou `BACKLOG_PORT`. Ne supprimez ni l’ancien conteneur ni son volume avant validation.
+Dans Dockge : **Pull**, puis **Up**. En ligne de commande :
 
-## Cycle de campagne
-
-- **Démarrer** : ajoute à la file tous les jeux sans profil et lance le worker.
-- **Suspendre** : laisse le jeu courant terminer, puis arrête la file.
-- **Reprendre** : continue les jeux restants.
-- **Relancer les échecs** : remet uniquement les jeux échoués en attente.
-- **Redémarrage Docker** : un job marqué `processing` est remis en attente ; une campagne `running` repart automatiquement.
-- **Fin** : `completed` ou `completed_with_errors` selon le résultat.
-
-Les erreurs sont visibles dans l’interface et détaillées dans les journaux du conteneur :
-
-```bash
-docker logs -f backlog-core
+```sh
+docker compose pull
+docker compose up -d
+docker compose logs -f backlog
 ```
 
-## API essentielle
+Le journal doit afficher `V1.1.1` et une migration réussie. Ouvrez ensuite `http://ADRESSE_DU_NAS:3000` et vérifiez le nombre de jeux, quelques couvertures et plusieurs profils avant de reprendre la campagne.
 
-| Méthode | Route | Rôle |
-|---|---|---|
-| GET | `/api/health` | Santé du service |
-| GET | `/api/library/stats` | Statistiques globales |
-| GET | `/api/library/games` | Bibliothèque paginée et filtrable |
-| GET | `/api/games/:appId` | Jeu et profil |
-| GET | `/api/enrichment` | État persistant de campagne |
-| POST | `/api/enrichment/start` | Démarrer |
-| POST | `/api/enrichment/pause` | Suspendre après le jeu courant |
-| POST | `/api/enrichment/resume` | Reprendre |
-| POST | `/api/enrichment/retry-failures` | Relancer uniquement les échecs |
-| POST | `/api/discovery/recommend` | Recherche de résonances |
-| POST | `/api/discovery/feedback` | Mémoriser un retour |
+## Vérification après migration
 
-## Configuration
+Depuis la copie locale du projet :
 
-| Variable | Défaut | Description |
-|---|---|---|
-| `CORE_DATABASE_PATH` | `/data/backlog-core.sqlite` | Base Core persistante |
-| `LEGACY_DATABASE_PATH` | `/data/backlog.sqlite` | Inventaire historique en lecture seule logique |
-| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | URL Ollama |
-| `AI_ANALYSIS_MODEL` | `qwen3:32b` | Modèle de profil et d’évaluation |
-| `AI_EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
-| `ENRICHMENT_MAX_ATTEMPTS` | `1` | Tentatives automatiques avant état d’erreur |
-| `HTTP_TIMEOUT_MS` | `120000` | Délai maximal Ollama |
-| `STEAM_TIMEOUT_MS` | `20000` | Délai maximal Steam |
-| `DISCOVERY_SHORTLIST` | `20` | Candidats sémantiques évalués par le moteur |
-| `DISCOVERY_LIMIT` | `5` | Maximum de recommandations, jamais un minimum |
+```sh
+docker compose exec backlog node scripts/verify-database.mjs /data/backlog-core.sqlite
+```
+
+Le résultat attendu contient :
+
+```json
+{
+  "integrity": "ok",
+  "foreignKeyErrors": []
+}
+```
+
+L’endpoint `/api/compatibility` expose également le contrôle des tables effectué par la migration.
+
+## Retour arrière
+
+1. Arrêtez le conteneur V1.1.1.
+2. Ne modifiez pas la sauvegarde `*.pre-v1.1.1-*.sqlite`.
+3. Renommez la base migrée pour la conserver à des fins de diagnostic.
+4. Copiez la sauvegarde sous le nom `backlog-core.sqlite`.
+5. Redéployez l’ancienne image.
+
+Exemple, conteneur arrêté :
+
+```sh
+cd "$DATA_PATH"
+mv backlog-core.sqlite backlog-core.v1.1.1-diagnostic.sqlite
+cp backlog-core.pre-v1.1.1-AAAA-MM-JJ*.sqlite backlog-core.sqlite
+```
 
 ## Développement et tests
 
-Node.js 24 est recommandé ; aucune dépendance npm externe n’est nécessaire.
+Prérequis : Node.js 24 ou plus récent.
 
-```bash
-npm run check
+```sh
+npm ci
 npm test
-npm start
+MOCK_AI=1 DATABASE_PATH=/tmp/backlog-core.sqlite npm start
 ```
 
-Les tests couvrent : import sans connaissances IA historiques, poursuite après erreur, non-retraitement, suspension/reprise, récupération après redémarrage et disponibilité immédiate d’un nouveau profil dans Découverte.
-
-## Limites connues
-
-- La structure exacte de votre base NAS n’est pas présente dans ce livrable ; l’importeur adaptatif est testé sur une structure représentative. Vérifiez impérativement l’inventaire réel au premier démarrage.
-- La collecte Steam peut être limitée ou indisponible. Le pipeline conserve alors les métadonnées de l’inventaire et signale l’incertitude au modèle.
-- L’estimation restante repose sur la moyenne des jeux terminés ; elle varie selon Ollama, les tailles de contexte et les délais réseau.
-- Le fallback sémantique maintient Découverte utilisable si l’évaluation Qwen échoue, mais l’interface le signale comme une explication dégradée.
+Les tests créent une base V1.0 représentative avec toutes les tables signalées, migrent deux fois la base, comparent les données, contrôlent les clés étrangères, vérifient la sauvegarde et testent le worker autonome.

@@ -1,62 +1,20 @@
 services:
-  backlog-test:
-    image: ghcr.io/siivolabs/backlog:dev
-    container_name: backlog-test
+  backlog:
+    image: ${IMAGE_NAME:-ghcr.io/siivolabs/backlog}:${IMAGE_TAG:-latest}
+    build:
+      context: .
+    container_name: backlog
     restart: unless-stopped
-    user: "1000:1000"
+    ports:
+      - "${PORT:-3000}:3000"
     environment:
-      PORT: "3000"
-      DATA_DIR: "/data"
-      # Laisser vide pour la détection automatique du fichier SQLite existant.
-      DATABASE_PATH: "${DATABASE_PATH:-}"
-      ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
-      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://192.168.1.77:11434}"
-      AI_ANALYSIS_MODEL: "${AI_ANALYSIS_MODEL:-qwen3:32b}"
-      AI_EMBEDDING_MODEL: "${AI_EMBEDDING_MODEL:-embeddinggemma}"
-      AI_EMBEDDING_DIMENSIONS: "${AI_EMBEDDING_DIMENSIONS:-768}"
-      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
-      SEARXNG_LANGUAGE: "${SEARXNG_LANGUAGE:-fr-FR}"
-      AI_MAX_WEB_PAGES: "${AI_MAX_WEB_PAGES:-8}"
-      AI_MAX_PAGE_BYTES: "${AI_MAX_PAGE_BYTES:-750000}"
-      AI_PAGE_TIMEOUT_MS: "${AI_PAGE_TIMEOUT_MS:-15000}"
-      AI_DIAGNOSTIC_TIMEOUT_MS: "${AI_DIAGNOSTIC_TIMEOUT_MS:-15000}"
-      AI_DIAGNOSTIC_GENERATION_TIMEOUT_MS: "${AI_DIAGNOSTIC_GENERATION_TIMEOUT_MS:-60000}"
-      # Délais d'inactivité: chaque fragment Qwen reçu relance le compteur.
-      AI_ANALYSIS_INACTIVITY_TIMEOUT_MS: "${AI_ANALYSIS_INACTIVITY_TIMEOUT_MS:-480000}"
-      AI_PATH_REPAIR_INACTIVITY_TIMEOUT_MS: "${AI_PATH_REPAIR_INACTIVITY_TIMEOUT_MS:-120000}"
-      AI_VERIFICATION_INACTIVITY_TIMEOUT_MS: "${AI_VERIFICATION_INACTIVITY_TIMEOUT_MS:-480000}"
-      AI_OLLAMA_HEALTH_TIMEOUT_MS: "${AI_OLLAMA_HEALTH_TIMEOUT_MS:-10000}"
-      EXPERIMENT_SIZE: "${EXPERIMENT_SIZE:-50}"
-      USE_DRAFT_PROFILES: "${USE_DRAFT_PROFILES:-true}"
-      NETWORK_USABLE_THRESHOLD: "${NETWORK_USABLE_THRESHOLD:-0.45}"
-      NETWORK_JOB_POLL_MS: "${NETWORK_JOB_POLL_MS:-500}"
-      NETWORK_GAME_TIMEOUT_MS: "${NETWORK_GAME_TIMEOUT_MS:-2700000}"
-      USEFUL_SIMILARITY_THRESHOLD: "${USEFUL_SIMILARITY_THRESHOLD:-0.55}"
-      AI_EMBEDDING_TIMEOUT_MS: "${AI_EMBEDDING_TIMEOUT_MS:-120000}"
-      # Pipeline compact V0.9.5.0 : aucun téléchargement web, stockage séparé.
-      FAST_SEMANTIC_SIZE: "${FAST_SEMANTIC_SIZE:-50}"
-      FAST_SEMANTIC_MAX_INPUT_CHARS: "${FAST_SEMANTIC_MAX_INPUT_CHARS:-28000}"
-      FAST_SEMANTIC_MAX_TOKENS: "${FAST_SEMANTIC_MAX_TOKENS:-1200}"
-      FAST_SEMANTIC_INACTIVITY_TIMEOUT_MS: "${FAST_SEMANTIC_INACTIVITY_TIMEOUT_MS:-180000}"
-      # Backlog Discovery V0.9.7 : mémoire locale, présélection large, analyse Qwen ciblée.
-      DISCOVERY_LIBRARY_LIMIT: "${DISCOVERY_LIBRARY_LIMIT:-5000}"
-      DISCOVERY_CANDIDATE_LIMIT: "${DISCOVERY_CANDIDATE_LIMIT:-40}"
-      DISCOVERY_DEEP_CANDIDATES: "${DISCOVERY_DEEP_CANDIDATES:-12}"
-      DISCOVERY_INTERPRET_MAX_TOKENS: "${DISCOVERY_INTERPRET_MAX_TOKENS:-1600}"
-      DISCOVERY_ANALYSIS_MAX_TOKENS: "${DISCOVERY_ANALYSIS_MAX_TOKENS:-3600}"
-      DISCOVERY_INACTIVITY_TIMEOUT_MS: "${DISCOVERY_INACTIVITY_TIMEOUT_MS:-240000}"
+      PORT: 3000
+      DATABASE_PATH: /data/backlog-core.sqlite
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AI_ANALYSIS_MODEL: ${AI_ANALYSIS_MODEL:-qwen3:32b}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-embeddinggemma}
+      MOCK_AI: ${MOCK_AI:-0}
     volumes:
-      - ./data:/data
-    networks:
-      - npm_default
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
-networks:
-  npm_default:
-    external: true
+      - ${DATA_PATH:?Définissez DATA_PATH dans .env}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
