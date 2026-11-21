@@ -1,62 +1,77 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#091525"><title>Backlog Core</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Backlog Core</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" type="module"></script>
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <a class="brand" href="#library" aria-label="Backlog Core"><span class="brand-mark">B</span><span><strong>Backlog</strong><small>CORE · V1.0</small></span></a>
-      <nav aria-label="Navigation principale">
-        <button class="nav active" data-view="library"><span>01</span> Bibliothèque</button>
-        <button class="nav" data-view="enrichment"><span>02</span> Enrichissement</button>
-        <button class="nav" data-view="discovery"><span>03</span> Découverte</button>
-      </nav>
-      <button id="diagnosticsBtn" class="icon-btn" title="État du système" aria-label="État du système">●</button>
-    </header>
-    <main>
-      <section id="library" class="view active">
-        <div class="hero">
-          <div><p class="eyebrow">VOTRE INVENTAIRE · VOTRE MÉMOIRE</p><h1>La bibliothèque,<br><em>sans le bruit.</em></h1><p>Votre véritable inventaire Steam est importé depuis l'installation précédente. Les anciennes connaissances IA restent volontairement à l'écart.</p></div>
-          <div class="stats-panel">
-            <div><strong id="inventoryCount">—</strong><span>jeux inventoriés</span></div><div><strong id="analyzedCount">—</strong><span>profils neufs</span></div><div><strong id="selectedCount">—</strong><span>dans le lot</span></div>
-          </div>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="topbar">
+    <a class="brand" href="#library" aria-label="Backlog Core"><span class="brand-mark">B</span><span><strong>Backlog</strong><small>CORE <span id="version"></span></small></span></a>
+    <nav aria-label="Navigation principale">
+      <button class="nav-button active" data-view="library">Bibliothèque</button>
+      <button class="nav-button" data-view="discovery">Découverte</button>
+    </nav>
+    <button id="adminButton" class="token-button"><span class="lock">◆</span> Jeton administrateur</button>
+  </header>
+
+  <main>
+    <section id="libraryView" class="view active">
+      <div class="hero">
+        <div><p class="eyebrow">BIBLIOTHÈQUE STEAM</p><h1>Votre collection, <span>pleinement comprise.</span></h1><p class="lead">Backlog enrichit chaque jeu en arrière-plan. Vous pouvez fermer cette page&nbsp;: le traitement continue dans Docker.</p></div>
+        <div class="hero-actions"><input id="inventoryFile" class="hidden" type="file" accept="application/json,.json,.txt"><button id="importButton" class="secondary">Importer l’inventaire</button><button id="campaignAction" class="primary">Lancer l’enrichissement</button><button id="retryButton" class="secondary hidden">Relancer les erreurs</button></div>
+      </div>
+
+      <section class="campaign-panel" aria-labelledby="campaignTitle">
+        <div class="campaign-heading"><div><p class="eyebrow">ENRICHISSEMENT GLOBAL</p><h2 id="campaignTitle">Progression de la bibliothèque</h2></div><span id="campaignBadge" class="badge idle">Inactif</span></div>
+        <div class="metrics">
+          <article><span>Jeux inventoriés</span><strong id="gamesCount">—</strong></article>
+          <article><span>Jeux enrichis</span><strong id="enrichedCount">—</strong></article>
+          <article><span>En cours</span><strong id="processingCount">—</strong></article>
+          <article><span>En erreur</span><strong id="failedCount">—</strong></article>
+          <article><span>Restants</span><strong id="remainingCount">—</strong></article>
         </div>
-        <div id="importAlert" class="notice hidden"></div>
-        <div class="toolbar">
-          <label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Rechercher un titre, un studio, un genre…" autocomplete="off"></label>
-          <div class="segmented"><button data-filter="all" class="active">Tous</button><button data-filter="inventoried">Inventoriés</button><button data-filter="analyzed">Analysés</button><button data-filter="selected">Lot</button></div>
-        </div>
-        <div class="section-head"><div><p class="eyebrow">MANIFESTE</p><h2 id="libraryTitle">Tous les jeux</h2></div><span id="resultCount" class="pill">—</span></div>
+        <div class="progress-meta"><span id="currentStep">Prêt</span><strong id="progressText">0 %</strong></div>
+        <div class="progress-track"><div id="progressBar"></div></div>
+        <p class="subtle">La pause prend effet après le jeu en cours. L’état et la file sont conservés dans SQLite et repris après un redémarrage.</p>
+      </section>
+
+      <section class="library-section">
+        <div class="section-header"><div><p class="eyebrow">VOS JEUX</p><h2>Bibliothèque</h2></div><label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Rechercher un jeu ou un studio"></label></div>
+        <div class="filter-row" role="group" aria-label="Filtres"><button class="filter active" data-status="all">Tous</button><button class="filter" data-status="enriched">Enrichis</button><button class="filter" data-status="pending">À enrichir</button><button class="filter" data-status="failed">En erreur</button><span id="resultCount"></span></div>
         <div id="gameGrid" class="game-grid" aria-live="polite"></div>
-        <button id="loadMore" class="secondary hidden">Afficher plus</button>
+        <div class="pagination"><button id="previousPage" class="secondary">Précédent</button><span id="pageText"></span><button id="nextPage" class="secondary">Suivant</button></div>
       </section>
 
-      <section id="enrichment" class="view">
-        <div class="hero compact"><div><p class="eyebrow">AXE HORIZONTAL × AXE VERTICAL</p><h1>Comprendre<br><em>les expériences.</em></h1><p>Un lot de 50 jeux maximum, un seul pipeline visible, un profil homogène par jeu.</p></div><div class="batch-meter"><div class="ring"><strong id="batchCount">0</strong><span>/ 50</span></div><p>jeux sélectionnés</p></div></div>
-        <div class="two-col">
-          <div class="panel"><div class="panel-head"><div><p class="eyebrow">LOT DE TRAVAIL</p><h2>Jeux à enrichir</h2></div><button id="clearBatch" class="text-btn">Vider</button></div><div id="batchList" class="batch-list"></div></div>
-          <div class="panel pipeline"><p class="eyebrow">PIPELINE UNIQUE</p><h2>Collecter → Analyser → Représenter</h2><p class="muted">Les faits officiels sont collectés à nouveau. Aucun profil, embedding ou réseau historique n'est importé.</p><div id="runSummary" class="run-summary empty-state">Aucun enrichissement lancé.</div><div class="actions"><button id="startRun" class="primary">Enrichir la sélection</button><button id="pauseRun" class="secondary hidden">Suspendre</button><button id="resumeRun" class="secondary hidden">Reprendre</button></div></div>
-        </div>
-        <div id="profileInspector" class="panel hidden"></div>
+      <section class="errors-section" aria-labelledby="errorsTitle">
+        <div class="section-header"><div><p class="eyebrow">SUPERVISION</p><h2 id="errorsTitle">Suivi des erreurs</h2></div><button id="refreshErrors" class="secondary">Actualiser</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Jeu</th><th>Tentatives</th><th>Dernière erreur</th><th>Date</th></tr></thead><tbody id="errorsBody"><tr><td colspan="4" class="empty">Aucune erreur signalée.</td></tr></tbody></table></div>
       </section>
+    </section>
 
-      <section id="discovery" class="view">
-        <div class="hero compact"><div><p class="eyebrow">INTENTIONS × RÉSONANCES</p><h1>Pourquoi ce jeu<br><em>vous touche-t-il ?</em></h1><p>Choisissez une œuvre analysée, exprimez ce que vous y recherchez, puis laissez Backlog trouver les échos les plus justes.</p></div></div>
-        <div class="discovery-flow">
-          <div class="step"><span class="step-no">01</span><div><label for="referenceSelect">Jeu de référence</label><select id="referenceSelect"><option value="">Choisir un jeu analysé…</option></select></div></div>
-          <div class="step"><span class="step-no">02</span><div><label for="motivationInput">Ce que vous aimez, ce que vous recherchez</label><textarea id="motivationInput" rows="5" placeholder="Ex. J'aime la sensation de maîtriser progressivement un système complexe, sans pression constante…"></textarea></div></div>
-          <button id="discoverBtn" class="primary wide">Trouver les résonances</button>
-        </div>
-        <div id="discoveryResults" class="recommendations"></div>
+    <section id="discoveryView" class="view">
+      <div class="hero compact"><div><p class="eyebrow">DÉCOUVERTE</p><h1>Retrouvez l’expérience <span>qui vous appelle.</span></h1><p class="lead">Partez d’un jeu connu ou exprimez une motivation. Les résultats utilisent vos profils Core et vos corrections existantes.</p></div></div>
+      <section class="discovery-form panel">
+        <label>Jeu de référence<input id="referenceInput" list="gameSuggestions" placeholder="AppID ou titre exact"><datalist id="gameSuggestions"></datalist></label>
+        <label>Ce que vous recherchez<textarea id="motivationInput" rows="3" placeholder="Ex. une exploration calme, mystérieuse et peu directive"></textarea></label>
+        <button id="discoverButton" class="primary">Explorer ma bibliothèque</button>
       </section>
-    </main>
-  </div>
-  <dialog id="gameDialog"><button class="dialog-close" aria-label="Fermer">×</button><div id="gameDialogBody"></div></dialog>
-  <dialog id="diagnosticsDialog"><button class="dialog-close" aria-label="Fermer">×</button><div id="diagnosticsBody"></div></dialog>
-  <div id="toast" class="toast" role="status"></div>
-  <script src="/app.js" defer></script>
+      <div id="discoveryResults" class="game-grid discovery-grid"></div>
+    </section>
+  </main>
+
+  <dialog id="tokenDialog">
+    <form method="dialog" id="tokenForm">
+      <div class="dialog-icon">◆</div><p class="eyebrow">ACCÈS PROTÉGÉ</p><h2>Jeton administrateur</h2><p>Le jeton est requis pour importer, enrichir, suspendre, reprendre ou enregistrer une correction. Il reste uniquement dans cette session de navigateur.</p>
+      <label>Jeton<input id="tokenInput" type="password" autocomplete="current-password" required placeholder="ADMIN_TOKEN"></label>
+      <p id="tokenError" class="form-error"></p>
+      <div class="dialog-actions"><button type="button" id="tokenCancel" class="secondary">Consulter seulement</button><button type="submit" class="primary">Valider</button></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

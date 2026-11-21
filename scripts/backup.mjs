@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+const source = process.env.DATABASE_PATH || '/data/backlog-core.sqlite';
+if (!fs.existsSync(source)) throw new Error(`Base introuvable: ${source}`);
+const destinationDir = process.env.BACKUP_PATH || path.join(path.dirname(source), 'backups');
+fs.mkdirSync(destinationDir, { recursive: true });
+const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+const destination = path.join(destinationDir, `backlog-core-${stamp}.sqlite`);
+const db = new DatabaseSync(source);
+db.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`);
+db.close();
+console.log(destination);

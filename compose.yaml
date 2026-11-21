@@ -1,0 +1,31 @@
+services:
+  backlog:
+    image: ghcr.io/siivolabs/backlog:latest
+    container_name: backlog
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATABASE_PATH: /data/backlog-core.sqlite
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN doit être défini}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AI_ANALYSIS_MODEL: ${AI_ANALYSIS_MODEL:-qwen3:32b}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-embeddinggemma}
+      STEAM_ENRICHMENT_ENABLED: ${STEAM_ENRICHMENT_ENABLED:-true}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-120000}
+    volumes:
+      - ${DATA_PATH:-./data}:/data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - npm_default
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+networks:
+  npm_default:
+    external: true
