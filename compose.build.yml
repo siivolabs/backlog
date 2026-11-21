@@ -1,6 +1,0 @@
-services:
-  backlog-core:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: backlog-core:1.1.0-local
