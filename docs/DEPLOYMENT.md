@@ -1,70 +1,75 @@
-# Déploiement GitHub → GHCR → Dockge
+# Déploiement GitHub → GHCR → Dockge — V1.1.4
 
-## 1. Avant toute chose
+## 1. Sauvegarder sans modifier le NAS
 
-1. Revenez à une copie de la base **Backlog Core V1.0**, pas à une base transformée par V1.1/V1.1.1.
-2. Sauvegardez le fichier SQLite et conservez l'image Docker V1.0 disponible pour le retour arrière.
-3. N'écrasez jamais la seule copie de la base.
+Avant tout redéploiement :
 
-Contrôle facultatif en local ou dans un conteneur Node 24 :
+1. sauvegardez le fichier SQLite actuellement utilisé par Backlog Core V1.1.3 ;
+2. conservez l’identifiant ou le tag de l’image précédente pour le retour arrière ;
+3. ne supprimez et ne déplacez pas le volume de données.
+
+Contrôles facultatifs sur une copie de la base, avec Node 24 :
 
 ```bash
-DATABASE_PATH=/chemin/backlog-core.sqlite npm run preflight
-DATABASE_PATH=/chemin/backlog-core.sqlite BACKUP_PATH=/chemin/backups npm run backup
+DATABASE_PATH=/chemin/copie/backlog-core.sqlite npm run preflight
+DATABASE_PATH=/chemin/copie/backlog-core.sqlite BACKUP_PATH=/chemin/backups npm run backup
 ```
+
+V1.1.4 n’ajoute aucune migration. Le même fichier `backlog-core.sqlite` doit être remonté dans `/data`.
 
 ## 2. Remplacer proprement le dépôt GitHub
 
-L'archive est un **instantané complet**. Pour éviter que d'anciens fichiers continuent d'interférer :
+L’archive est un **instantané complet**. Pour éviter que les anciens fichiers v0.4 (`server.js`, `test/`, etc.) continuent d’interférer :
 
-1. Clonez le dépôt dans un dossier de travail.
-2. Supprimez son contenu suivi, en conservant seulement `.git/`.
-3. Copiez **tout** le contenu de l'archive, fichiers cachés compris.
-4. Vérifiez que `test/` au singulier n'existe pas et que `tests/` contient la suite ES actuelle.
-5. Validez puis poussez sur `main`.
+1. dans GitHub Desktop, ouvrez **Repository → Show in Explorer** ;
+2. supprimez tout le contenu du dossier, sauf `.git/` ;
+3. copiez tout le contenu de l’archive V1.1.4, fichiers cachés compris ;
+4. vérifiez que `test/` au singulier n’existe pas et que `tests/` contient la suite ES actuelle ;
+5. validez puis poussez sur `main`.
 
-Exemple :
+Exemple en ligne de commande :
 
 ```bash
 git rm -r .
 # copier ici le contenu décompressé, y compris .github, .dockerignore et .env.example
 git add -A
-git commit -m "Restore Core V1.0 and add persistent background enrichment"
+git commit -m "Release Backlog Core V1.1.4"
 git push origin main
 ```
 
-Le workflow utilise Node 24, exécute `npm test` et `npm run check`, construit l'image, puis publie `ghcr.io/siivolabs/backlog:latest` et un tag `sha-*`.
+Le workflow utilise Node 24, exécute `npm test` et `npm run check`, construit l’image, puis publie `ghcr.io/siivolabs/backlog:dev`, `:latest` et un tag immuable `sha-*`.
 
 ## 3. Dockge
 
-1. Copiez `.env.example` vers `.env` dans la stack.
-2. Renseignez un `ADMIN_TOKEN` long et unique.
-3. Réglez `DATA_PATH` sur le **dossier qui contient `backlog-core.sqlite`**. Ne changez pas ce chemin entre V1.0 et cette version.
-4. Vérifiez l'existence du réseau Docker externe `npm_default`.
-5. Faites **Pull**, puis **Up**.
-6. N'exposez Backlog qu'au réseau local ou derrière la politique d'accès de Nginx Proxy Manager.
+1. Conservez le volume et le `DATA_PATH` actuels.
+2. Vérifiez que `ADMIN_TOKEN` reste défini avec la même valeur souhaitée.
+3. Vérifiez l’existence du réseau externe `npm_default`.
+4. Le Compose fourni utilise `ghcr.io/siivolabs/backlog:dev`, aligné sur le conteneur existant.
+5. Une fois l’action GitHub réussie, faites **Pull**, puis recréez la stack.
+6. N’exposez Backlog qu’au réseau local ou derrière la politique d’accès de Nginx Proxy Manager.
 
-## 4. Vérifications avant enrichissement
+## 4. Vérifications fonctionnelles après redéploiement
 
 ```bash
 curl http://backlog.home/healthz
 ```
 
-Dans l'interface :
+La réponse doit annoncer `version: "1.1.4"` et `database: "ok"`.
 
-- confirmer le fond bleu;
-- saisir le jeton administrateur;
-- contrôler le nombre de jeux et plusieurs couvertures;
-- ouvrir Découverte et vérifier les profils existants;
-- contrôler « Suivi des erreurs »;
-- seulement ensuite, lancer l'enrichissement global.
+Dans l’interface :
 
-La pause termine le jeu courant. Une campagne `running` est reprise automatiquement après redémarrage du conteneur; un item interrompu repasse de `processing` à `pending`.
+- confirmer le fond bleu, les couvertures et le nombre de jeux ;
+- vérifier que le jeton administrateur fonctionne ;
+- dans Résonances, rechercher un jeu par titre, studio puis AppID ;
+- sélectionner une suggestion et vérifier que Découverte utilise son véritable AppID ;
+- saisir rapidement plusieurs recherches et confirmer qu’une ancienne réponse ne remplace pas la plus récente ;
+- ouvrir une carte enrichie dans la Bibliothèque et vérifier les champs du profil ;
+- confirmer que la consultation d’une fiche ne change ni les compteurs ni l’état de l’enrichissement.
 
 ## 5. Retour arrière
 
-1. Suspendre la campagne et attendre l'état `paused`.
+1. Suspendre la campagne et attendre l’état `paused` si elle est active.
 2. Arrêter la stack.
-3. Restaurer la copie SQLite effectuée avant déploiement.
-4. Revenir au tag d'image V1.0 conservé.
-5. Redémarrer la stack avec le même volume.
+3. Revenir à l’image précédente conservée.
+4. Réutiliser le même volume SQLite ; ne restaurer la sauvegarde que si le fichier a été endommagé indépendamment de V1.1.4.
+5. Redémarrer la stack.

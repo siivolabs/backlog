@@ -79,6 +79,17 @@ export function createApp(options = {}) {
       if (request.method === 'GET' && url.pathname === '/api/library') {
         return send(response, 200, listLibrary(db, Object.fromEntries(url.searchParams)));
       }
+
+      // BACKLOG_V1_1_4: consultation en lecture seule des profils déjà enrichis.
+      if (request.method === 'GET' && url.pathname === '/api/library/profile') {
+        const appId = String(url.searchParams.get('appId') || '').trim();
+        if (!/^\d+$/.test(appId)) return send(response, 400, { error: 'Steam AppID invalide.' });
+        const game = db.prepare('SELECT * FROM games WHERE CAST(app_id AS TEXT)=?').get(appId);
+        if (!game) return send(response, 404, { error: 'Jeu introuvable.' });
+        const profile = db.prepare('SELECT * FROM profiles WHERE CAST(app_id AS TEXT)=?').get(appId);
+        if (!profile) return send(response, 404, { error: 'Aucun profil enrichi pour ce jeu.' });
+        return send(response, 200, { game, profile });
+      }
       const detail = url.pathname.match(/^\/api\/library\/([^/]+)$/);
       if (request.method === 'GET' && detail) {
         const appId = decodeURIComponent(detail[1]);

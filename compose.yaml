@@ -1,6 +1,6 @@
 services:
   backlog:
-    image: ghcr.io/siivolabs/backlog:latest
+    image: ghcr.io/siivolabs/backlog:dev
     container_name: backlog
     restart: unless-stopped
     environment:

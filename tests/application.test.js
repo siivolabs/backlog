@@ -6,7 +6,7 @@ import { tempDir, v1Database, until } from './helpers.js';
 
 async function runningApp(processor = async (game) => ({ profile: { summary: game.title }, embedding: [1,0], source: {}, analysisModel: 'test', embeddingModel: 'test', confidence: .7 })) {
   const db = v1Database(path.join(tempDir(), 'app.sqlite'));
-  const app = createApp({ db, processor, config: { version: '1.1.3', port: 0, databasePath: '', adminToken: 'secret', ollamaBaseUrl: '', analysisModel: 'test', embeddingModel: 'test', steamEnrichmentEnabled: false, requestTimeoutMs: 1000 }, embed: async () => [1,0,0] });
+  const app = createApp({ db, processor, config: { version: '1.1.4', port: 0, databasePath: '', adminToken: 'secret', ollamaBaseUrl: '', analysisModel: 'test', embeddingModel: 'test', steamEnrichmentEnabled: false, requestTimeoutMs: 1000 }, embed: async () => [1,0,0] });
   await app.listen(0, '127.0.0.1');
   const { port } = app.server.address();
   return { app, base: `http://127.0.0.1:${port}` };

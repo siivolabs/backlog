@@ -36,6 +36,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/backlog
           tags: |
+            type=raw,value=dev
             type=raw,value=latest
             type=sha,prefix=sha-
       - uses: docker/build-push-action@v6

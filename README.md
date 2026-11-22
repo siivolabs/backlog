@@ -1,18 +1,26 @@
-# Backlog Core V1.1.3
+# Backlog Core V1.1.4
 
-Évolution conservatrice de **Backlog Core V1.0**. Elle préserve son identité bleue, son modèle SQLite, les couvertures, les profils, les corrections de Découverte et la protection par jeton administrateur. Les deux seules évolutions produit sont :
+Version complète fondée sur **Backlog Core V1.1.3**. Elle conserve l’interface bleue, les couvertures, le jeton administrateur, le modèle SQLite, les profils et embeddings existants, la Découverte et le pipeline autonome d’enrichissement.
 
-1. **Bibliothèque et enrichissement réunis** sur la page Bibliothèque.
-2. **Enrichissement global autonome**, exécuté côté serveur, persistant, suspendable et repris après redémarrage Docker.
+## Corrections V1.1.4
+
+1. **Jeu de référence dans Résonances**
+   - recherche indépendante par titre, studio ou Steam AppID ;
+   - résolution explicite vers le véritable AppID avant l’appel à Découverte ;
+   - annulation des recherches précédentes et rejet des réponses asynchrones obsolètes.
+2. **Fiches enrichies depuis la Bibliothèque**
+   - les cartes enrichies sont consultables au clic ou au clavier ;
+   - tous les champs du profil sont affichés, y compris les objets et tableaux JSON ;
+   - la consultation est strictement en lecture seule.
 
 ## Garanties de compatibilité
 
-- `games.app_id` reste `TEXT`; `games.title`, `games.studio`, `games.cover_url` et toutes les colonnes V1.0 sont utilisées directement.
-- `profiles`, `discovery_feedback` et `discovery_sessions` gardent leur structure V1.0.
-- La migration ne crée que `core_background_campaign` et `core_background_queue`; aucune table métier existante n'est renommée, convertie ou supprimée.
-- Une base au schéma V1.1 incompatible est refusée explicitement plutôt que transformée.
-- Toutes les mutations administratives exigent `ADMIN_TOKEN`. Sans configuration du jeton, elles restent verrouillées.
-- Les anciens fichiers `test/*.test.js` CommonJS ne sont pas inclus. La seule suite est `tests/`, en modules ES.
+- Aucune migration n’est ajoutée par V1.1.4.
+- `games.app_id` reste `TEXT`; les tables `games`, `profiles`, `discovery_feedback` et `discovery_sessions` ne changent pas.
+- `core_background_campaign` et `core_background_queue` restent celles de V1.1.3.
+- Le pipeline d’enrichissement, les profils, embeddings, sessions et corrections existants restent inchangés.
+- Toutes les mutations administratives exigent `ADMIN_TOKEN`.
+- L’archive ne contient ni ancien dossier `test/`, ni données SQLite, ni sauvegarde du kit correctif, ni `node_modules`.
 
 ## Démarrage local
 
@@ -21,17 +29,19 @@ Prérequis : Node.js 24.
 ```bash
 cp .env.example .env
 set -a; . ./.env; set +a
+npm ci --ignore-scripts
 npm test
 npm run check
 npm start
 ```
 
-Ouvrir `http://localhost:3000`. Le navigateur demande le jeton d'administration et le garde uniquement dans `sessionStorage`.
+Ouvrir `http://localhost:3000`. Le navigateur garde le jeton uniquement dans `sessionStorage`.
 
 ## API principale
 
 - `GET /healthz`
-- `GET /api/library`
+- `GET /api/library` — paramètres `search`, `status`, `page`, `pageSize`
+- `GET /api/library/profile?appId=...` — profil enrichi en lecture seule
 - `POST /api/library/import` — administrateur
 - `GET /api/enrichment/status`
 - `GET /api/enrichment/errors`
@@ -39,8 +49,10 @@ Ouvrir `http://localhost:3000`. Le navigateur demande le jeton d'administration 
 - `POST /api/discovery`
 - `POST /api/discovery/feedback` — administrateur
 
-Le jeton se transmet par `X-Admin-Token` ou `Authorization: Bearer …`.
+Le jeton se transmet par `X-Admin-Token` ou `Authorization: Bearer ...`.
 
-## Déploiement
+## Publication et déploiement
 
-Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). **Cette archive ne déploie rien sur le NAS.**
+Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Le workflow publie les tags GHCR `dev`, `latest` et `sha-*`; le Compose Dockge fourni reste aligné sur le tag `dev` déjà utilisé par la stack.
+
+**Cette archive ne déploie rien sur le NAS.**

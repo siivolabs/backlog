@@ -9,7 +9,12 @@ export function listLibrary(db, options = {}) {
   const status = String(options.status || 'all');
   const where = [];
   const params = [];
-  if (search) { where.push('(g.title LIKE ? COLLATE NOCASE OR g.studio LIKE ? COLLATE NOCASE)'); params.push(`%${search}%`, `%${search}%`); }
+  // BACKLOG_V1_1_4: recherche isolée de l'enrichissement ; inclut l'AppID.
+  if (search) {
+    const pattern = `%${search}%`;
+    where.push('(CAST(g.app_id AS TEXT) LIKE ? OR g.title LIKE ? COLLATE NOCASE OR g.studio LIKE ? COLLATE NOCASE)');
+    params.push(pattern, pattern, pattern);
+  }
   if (status === 'enriched') where.push('p.app_id IS NOT NULL');
   else if (status === 'failed') where.push("q.status='failed'");
   else if (status === 'pending') where.push("(q.status IN ('pending','processing') OR (q.app_id IS NULL AND p.app_id IS NULL))");

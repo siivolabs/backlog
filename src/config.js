@@ -12,7 +12,7 @@ function number(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
 
 export function loadConfig(env = process.env) {
   return {
-    version: '1.1.3',
+    version: '1.1.4',
     port: number(env.PORT, 3000, 1, 65535),
     databasePath: path.resolve(env.DATABASE_PATH || '/data/backlog-core.sqlite'),
     adminToken: env.ADMIN_TOKEN || '',

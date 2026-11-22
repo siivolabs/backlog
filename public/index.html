@@ -56,7 +56,7 @@
     <section id="discoveryView" class="view">
       <div class="hero compact"><div><p class="eyebrow">DÉCOUVERTE</p><h1>Retrouvez l’expérience <span>qui vous appelle.</span></h1><p class="lead">Partez d’un jeu connu ou exprimez une motivation. Les résultats utilisent vos profils Core et vos corrections existantes.</p></div></div>
       <section class="discovery-form panel">
-        <label>Jeu de référence<input id="referenceInput" list="gameSuggestions" placeholder="AppID ou titre exact"><datalist id="gameSuggestions"></datalist></label>
+        <label>Jeu de référence<input id="referenceInput" list="referenceSuggestions" placeholder="AppID ou titre exact" autocomplete="off"><datalist id="referenceSuggestions"></datalist></label>
         <label>Ce que vous recherchez<textarea id="motivationInput" rows="3" placeholder="Ex. une exploration calme, mystérieuse et peu directive"></textarea></label>
         <button id="discoverButton" class="primary">Explorer ma bibliothèque</button>
       </section>
@@ -73,5 +73,14 @@
     </form>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- BACKLOG_V1_1_4: fiche de profil enrichi, sans mutation des données. -->
+  <dialog id="profileDialog" class="profile-dialog" aria-labelledby="profileTitle">
+    <form method="dialog" class="profile-dialog__header">
+      <div><p class="eyebrow">PROFIL ENRICHI</p><h2 id="profileTitle">Fiche du jeu</h2></div>
+      <button class="profile-dialog__close" value="close" aria-label="Fermer">×</button>
+    </form>
+    <div id="profileContent" class="profile-content"></div>
+  </dialog>
 </body>
 </html>
