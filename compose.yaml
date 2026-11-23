@@ -1,32 +1,30 @@
 services:
   backlog:
     image: ghcr.io/siivolabs/backlog:dev
-    container_name: backlog-test
+    container_name: backlog
+    restart: unless-stopped
     user: "1000:1000"
-    ports:
-      - "127.0.0.1:3087:3000"
-    networks:
-      - default
-      - npm_network
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    tmpfs:
-      - /tmp
-    restart: unless-stopped
     environment:
       PORT: 3000
-      DATA_DIR: /data
-      DB_PATH: /data/backlog-core.sqlite
-      ADMIN_TOKEN: ${ADMIN_TOKEN}
-      OLLAMA_URL: ${OLLAMA_URL:-http://192.168.1.77:11434}
-      OLLAMA_ANALYSIS_MODEL: ${OLLAMA_ANALYSIS_MODEL:-qwen2.5:7b}
-      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      DATABASE_PATH: /data/backlog-core.sqlite
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN doit être défini}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AI_ANALYSIS_MODEL: ${AI_ANALYSIS_MODEL:-qwen3:32b}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-embeddinggemma}
+      ENRICHMENT_ENABLED: "false"
     volumes:
-      - ./data:/data
+      - ${DATA_PATH:-./data}:/data
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - npm_default
 networks:
-  npm_network:
+  npm_default:
     external: true
-    name: npm_default

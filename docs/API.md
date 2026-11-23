@@ -1,13 +1,9 @@
-# API
+# API du correctif historique
 
-- `GET /healthz` — état, version, version de schéma et compteurs.
-- `GET /api/library?q=&completed=&limit=&offset=` — bibliothèque.
-- `GET /api/games/:appId` — jeu, profil, sources, modèles et embedding.
-- `PATCH /api/games/:appId/completed` — `{ "completed": true|false }`.
-- `POST /api/discovery` — requête, AppID de référence, embedding fourni ou `surprise`.
-- `POST /api/discovery/feedback` — retour positif/négatif.
-- `POST /api/import/steam` — import non destructif, jeton administrateur requis.
-- `GET /api/enrichment/status` — état de la file.
-- `POST /api/enrichment/run` — lot Ollama, jeton administrateur requis.
-
-Le jeton est accepté via `X-Admin-Token` ou `Authorization: Bearer …`.
+- `GET /healthz` : compteurs, version et capacités détectées ;
+- `GET /api/library` : bibliothèque issue de `games` et `profiles` ;
+- `GET /api/games/:appId` : fiche, profil, sources, modèles et embedding ;
+- `POST /api/discovery` : découverte à partir des embeddings existants ;
+- `POST /api/discovery/feedback` : retour utilisateur si la table historique compatible existe ;
+- `PATCH /api/games/:appId/completed` : disponible seulement si `game_user_state` existe déjà ; aucune table n'est créée ;
+- `POST /api/enrichment/run` : refusé tant que `ENRICHMENT_ENABLED=false`.

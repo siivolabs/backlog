@@ -36,13 +36,13 @@ function staticFile(urlPath, response) {
 }
 
 export function createBacklogServer(config, options = {}) {
-  const db = options.db || openDatabase(config.dbPath, { backup: options.backup !== false });
+  const db = options.db || openDatabase(config.databasePath);
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://backlog.local');
       if (request.method === 'GET' && url.pathname === '/healthz') {
         const counts = db.prepare('SELECT (SELECT COUNT(*) FROM games) games,(SELECT COUNT(*) FROM profiles) profiles').get();
-        return send(response, 200, { status: 'ok', version: '1.2.1', schemaVersion: db.prepare('PRAGMA user_version').get().user_version, ...counts });
+        return send(response, 200, { status: 'ok', version: config.version, database: 'historical-existing', capabilities: db.capabilities, ...counts });
       }
       if (request.method === 'GET' && url.pathname === '/api/library') {
         const completedRaw = url.searchParams.get('completed');
@@ -68,9 +68,15 @@ export function createBacklogServer(config, options = {}) {
       if (request.method === 'POST' && url.pathname === '/api/discovery/feedback') return send(response, 201, recordFeedback(db, await body(request)));
       if (request.method === 'POST' && url.pathname === '/api/import/steam') { requireAdmin(request, config); return send(response, 200, importSteam(db, await body(request))); }
       if (request.method === 'GET' && url.pathname === '/api/enrichment/status') {
-        return send(response, 200, { queue: db.prepare('SELECT status,COUNT(*) count FROM enrichment_queue GROUP BY status').all() });
+        if (!db.capabilities.enrichmentQueue) return send(response, 200, { enabled: false, queue: [], message: 'Ré-enrichissement désactivé; base historique laissée intacte.' });
+        const queueId = db.prepare("PRAGMA table_info(enrichment_queue)").all().some((row) => row.name === 'app_id') ? 'app_id' : 'game_id';
+        return send(response, 200, { enabled: config.enrichmentEnabled, identifier: queueId, queue: db.prepare('SELECT status,COUNT(*) count FROM enrichment_queue GROUP BY status').all() });
       }
-      if (request.method === 'POST' && url.pathname === '/api/enrichment/run') { requireAdmin(request, config); return send(response, 200, await runEnrichmentBatch(db, config, (await body(request)).limit)); }
+      if (request.method === 'POST' && url.pathname === '/api/enrichment/run') {
+        requireAdmin(request, config);
+        if (!config.enrichmentEnabled) return send(response, 409, { error: 'Ré-enrichissement désactivé dans ce correctif de reconnexion historique.' });
+        return send(response, 200, await runEnrichmentBatch(db, config, (await body(request)).limit));
+      }
       if (request.method === 'GET' && !url.pathname.startsWith('/api/') && staticFile(url.pathname, response)) return;
       send(response, 404, { error: 'Route introuvable.' });
     } catch (error) {
