@@ -1,88 +1,19 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>Backlog Core</title>
-  <link rel="stylesheet" href="/styles.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Backlog Core</title><link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="#library" aria-label="Backlog Core, accueil"><span class="brand-mark">B</span><span>Backlog<small>CORE V1.2.0</small></span></a>
-    <nav aria-label="Navigation principale">
-      <button class="nav-button active" data-view="library">Bibliothèque</button>
-      <button class="nav-button" data-view="discovery">Découverte</button>
-    </nav>
-    <button id="tokenButton" class="button subtle">✦ Jeton administrateur</button>
-  </header>
-
-  <main>
-    <section id="libraryView" class="view active">
-      <div class="hero compact">
-        <p class="eyebrow">VOTRE COLLECTION</p>
-        <h1>Une bibliothèque qui<br><span>comprend vos jeux.</span></h1>
-        <p>Les profils restent consultables. Les jeux terminés restent connus, mais ne sont plus proposés en découverte.</p>
-      </div>
-      <section class="stats panel" aria-label="État de Backlog">
-        <div><strong id="gameCount">—</strong><span>jeux</span></div>
-        <div><strong id="profileCount">—</strong><span>profils</span></div>
-        <div><strong id="completedCount">—</strong><span>terminés</span></div>
-        <div><strong id="queueCount">—</strong><span>à enrichir</span></div>
-        <div class="stat-actions"><label class="file-button">Importer JSON<input id="inventoryFile" type="file" accept="application/json,.json"></label><button id="enrichmentToggle" class="button subtle">Pause</button></div>
-      </section>
-      <section class="library-section">
-        <div class="section-header">
-          <div><p class="eyebrow">VOS JEUX</p><h2>Bibliothèque</h2><p id="resultCount" class="muted"></p></div>
-          <div class="filters">
-            <select id="statusFilter" aria-label="Filtrer la bibliothèque"><option value="all">Tous les jeux</option><option value="enriched">Enrichis</option><option value="pending">À enrichir</option><option value="completed">Terminés</option><option value="not-completed">Non terminés</option></select>
-            <label class="search"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="Titre, studio ou AppID" autocomplete="off"></label>
-          </div>
-        </div>
-        <div id="gameGrid" class="game-grid" aria-live="polite"></div>
-        <div class="pagination"><button id="previousPage" class="button subtle">Précédent</button><span id="pageText">Page 1 / 1</span><button id="nextPage" class="button subtle">Suivant</button></div>
-      </section>
-    </section>
-
-    <section id="discoveryView" class="view">
-      <div class="hero compact">
-        <p class="eyebrow">DÉCOUVERTE FIABILISÉE</p>
-        <h1>Trouvez l’expérience qui<br><span>vous appelle.</span></h1>
-        <p>Backlog distingue désormais la proximité sémantique de la fiabilité documentaire, renouvelle les propositions et exclut les jeux terminés.</p>
-      </div>
-      <section class="discovery-form panel">
-        <div class="field suggestion-field">
-          <label for="referenceInput">Jeu de référence <span class="optional">facultatif</span></label>
-          <input id="referenceInput" placeholder="Rechercher par titre, studio ou AppID" autocomplete="off" aria-autocomplete="list" aria-controls="referenceSuggestions">
-          <input id="referenceAppId" type="hidden">
-          <div id="referenceSelection" class="reference-selection" hidden></div>
-          <div id="referenceSuggestions" class="suggestions" role="listbox" hidden></div>
-        </div>
-        <div class="field motivation-field">
-          <label for="motivationInput">Ce que vous recherchez <span class="optional">facultatif</span></label>
-          <textarea id="motivationInput" rows="3" placeholder="Décrivez une envie, une atmosphère, un type d’expérience…"></textarea>
-        </div>
-        <div class="discovery-actions">
-          <button id="discoverButton" class="button primary">Explorer ma bibliothèque</button>
-          <button id="surpriseButton" class="button subtle">Surprends-moi</button>
-        </div>
-      </section>
-      <div class="results-heading"><div><h2>Propositions</h2><p id="discoveryNotice" class="muted">Le moteur peut aussi s’abstenir lorsque les profils sont insuffisamment étayés.</p></div><span id="filteredCount" class="quality-summary"></span></div>
-      <div id="discoveryResults" class="game-grid discovery-grid" aria-live="polite"></div>
-    </section>
-  </main>
-
-  <dialog id="profileDialog" class="modal profile-modal">
-    <div class="modal-header"><div><p class="eyebrow">PROFIL ENRICHI</p><h2 id="profileTitle">Profil</h2></div><button class="icon-button" data-close="profileDialog" aria-label="Fermer">×</button></div>
-    <div id="profileContent" class="modal-content"></div>
-  </dialog>
-
-  <dialog id="tokenDialog" class="modal token-modal">
-    <div class="modal-header"><div><p class="eyebrow">ADMINISTRATION</p><h2>Jeton administrateur</h2></div><button class="icon-button" data-close="tokenDialog" aria-label="Fermer">×</button></div>
-    <form id="tokenForm" class="modal-content"><label class="field">ADMIN_TOKEN<input id="tokenInput" type="password" autocomplete="current-password"></label><p class="muted">Le jeton reste uniquement dans ce navigateur. Il est requis pour importer, corriger, terminer ou piloter l’enrichissement.</p><button class="button primary" type="submit">Enregistrer</button></form>
-  </dialog>
-
-  <div id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js" type="module"></script>
-</body>
-</html>
+<header><a class="brand" href="#library"><span>B</span><strong>Backlog<small>CORE V1.2.1</small></strong></a><nav><button data-view="library">Bibliothèque</button><button data-view="discovery">Découverte</button></nav><button id="adminButton" class="admin">Jeton administrateur</button></header>
+<main>
+  <section id="libraryView"><div class="hero"><div><p class="eyebrow">BIBLIOTHÈQUE</p><h1>Que voulez-vous explorer ?</h1><p>Vos jeux, vos profils expérientiels et votre historique restent sous votre contrôle.</p></div><div id="health" class="status">Connexion…</div></div>
+    <div class="toolbar"><input id="search" placeholder="Titre, studio ou AppID"><select id="completedFilter"><option value="">Tous les jeux</option><option value="0">À découvrir</option><option value="1">Terminés</option></select><button id="reload">Actualiser</button></div><div id="libraryGrid" class="grid"></div>
+  </section>
+  <section id="discoveryView" hidden><div class="hero"><div><p class="eyebrow">DÉCOUVERTE</p><h1>Je ne sais pas exactement à quoi jouer.</h1><p>Décrivez une envie ou laissez Backlog vous surprendre. Les profils insuffisamment documentés sont exclus.</p></div></div>
+    <form id="discoveryForm" class="discover-box"><label>Jeu de référence<input id="reference" placeholder="AppID ou laisser vide"></label><label>Ce que vous recherchez<textarea id="motivation" rows="4" placeholder="Une expérience courte, originale et respectueuse de mon temps…"></textarea></label><div><button type="submit" class="primary">Explorer ma bibliothèque</button><button type="button" id="surprise">Surprends-moi</button></div></form><p id="discoveryMessage"></p><div id="discoveryGrid" class="grid"></div>
+  </section>
+</main>
+<dialog id="details"><button class="close">×</button><div id="detailsContent"></div></dialog>
+<script type="module" src="/app.js"></script>
+</body></html>

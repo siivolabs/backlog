@@ -2,30 +2,31 @@ services:
   backlog:
     image: ghcr.io/siivolabs/backlog:dev
     container_name: backlog-test
-    restart: unless-stopped
-    read_only: true
     user: "1000:1000"
-    cap_drop: ["ALL"]
-    security_opt: ["no-new-privileges:true"]
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-      DATA_DIR: /app/data
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?Définissez ADMIN_TOKEN dans .env}
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_ANALYSIS_MODEL: ${OLLAMA_ANALYSIS_MODEL:-qwen3:32b}
-      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-embeddinggemma}
-      AUTO_ENRICH: ${AUTO_ENRICH:-true}
-      ENRICHMENT_CONCURRENCY: ${ENRICHMENT_CONCURRENCY:-1}
-      MIN_PROFILE_QUALITY: ${MIN_PROFILE_QUALITY:-0.35}
-    volumes:
-      - ./data:/app/data
-    tmpfs:
-      - /tmp:size=64m,noexec,nosuid,nodev
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3087:3000"
     networks:
-      - npm_default
+      - default
+      - npm_network
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATA_DIR: /data
+      DB_PATH: /data/backlog-core.sqlite
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      OLLAMA_URL: ${OLLAMA_URL:-http://192.168.1.77:11434}
+      OLLAMA_ANALYSIS_MODEL: ${OLLAMA_ANALYSIS_MODEL:-qwen2.5:7b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+    volumes:
+      - ./data:/data
 networks:
-  npm_default:
+  npm_network:
     external: true
+    name: npm_default

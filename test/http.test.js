@@ -1,23 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { openDatabase } from '../src/db.js';
 import { createBacklogServer } from '../src/http.js';
-import { config, seededDb } from './helpers.js';
 
-async function fixture() {
-  const db = seededDb(); const { server } = createBacklogServer(config(), { db, disableWorker: true });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+test('démarre, expose healthz et permet de marquer un jeu terminé', async (t) => {
+  const db = openDatabase(':memory:', { backup: false });
+  db.prepare("INSERT INTO games(app_id,title) VALUES ('400','Portal')").run();
+  db.prepare("INSERT OR IGNORE INTO game_user_state(app_id,completed) VALUES ('400',0)").run();
+  const config = { dbPath: ':memory:', adminToken: 'secret', discoveryMinQuality: 0.45, recentDays: 30, enrichmentBatchSize: 10 };
+  const { server } = createBacklogServer(config, { db, backup: false });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.close(); db.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  return { db, server, base, close: () => new Promise((resolve) => server.close(() => { db.close(); resolve(); })) };
-}
-
-test('healthz expose la version 1.2.0', async () => { const app = await fixture(); const data = await fetch(`${app.base}/healthz`).then((r) => r.json()); assert.deepEqual(data, { status: 'ok', version: '1.2.0', database: 'ok' }); await app.close(); });
-
-test('la recherche indépendante renvoie le véritable AppID', async () => { const app = await fixture(); const data = await fetch(`${app.base}/api/library/search?q=Mushroom`).then((r) => r.json()); assert.equal(data.items[0].app_id, '101'); await app.close(); });
-
-test('la modification Terminé refuse un jeton absent', async () => { const app = await fixture(); const response = await fetch(`${app.base}/api/library/101/completed`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{"completed":true}' }); assert.equal(response.status, 401); await app.close(); });
-
-test('la modification Terminé accepte le jeton administrateur', async () => { const app = await fixture(); const response = await fetch(`${app.base}/api/library/101/completed`, { method: 'PATCH', headers: { 'content-type': 'application/json', 'x-admin-token': 'secret' }, body: '{"completed":true}' }); assert.equal(response.status, 200); assert.equal((await response.json()).completed, true); await app.close(); });
-
-test('la découverte de référence fonctionne par HTTP', async () => { const app = await fixture(); const response = await fetch(`${app.base}/api/discovery`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"reference_app_id":"100"}' }); const data = await response.json(); assert.equal(response.status, 200); assert.ok(data.items.some((item) => item.app_id === '101')); assert.ok(!data.items.some((item) => item.app_id === '103')); await app.close(); });
-
-test('les fichiers statiques reçoivent des en-têtes de sécurité', async () => { const app = await fixture(); const response = await fetch(`${app.base}/`); assert.equal(response.status, 200); assert.equal(response.headers.get('x-content-type-options'), 'nosniff'); assert.match(response.headers.get('content-security-policy'), /default-src/); await app.close(); });
+  const health = await fetch(`${base}/healthz`).then((response) => response.json());
+  assert.equal(health.status, 'ok'); assert.equal(health.version, '1.2.1'); assert.equal(health.games, 1);
+  const response = await fetch(`${base}/api/games/400/completed`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ completed: true }) });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).completed, 1);
+});

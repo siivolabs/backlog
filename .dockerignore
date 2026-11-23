@@ -2,8 +2,8 @@
 .github
 node_modules
 npm-debug.log
-coverage
+.env
 data
 *.sqlite*
-*.zip
-.env
+coverage
+.DS_Store

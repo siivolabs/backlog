@@ -1,112 +1,120 @@
-# Backlog Core V1.2.0
+# Backlog Core V1.2.1
 
-Backlog est une bibliothèque de jeux auto-hébergée qui enrichit localement les métadonnées avec Ollama et aide à faire émerger des expériences déjà possédées.
+Version corrective complète de Backlog V1.2, conçue pour migrer **sans destruction** la base Core V1.1.x réelle (`backlog-core.sqlite`).
 
-## Ce que change V1.2
+## Correction critique
 
-La version 1.2 conserve la bibliothèque, les profils et les embeddings de V1.1.4, puis fiabilise leur exploitation :
+La migration V1.2.0 créait certains index avant d'avoir adapté les tables déjà présentes. Sur une base Core historique, `CREATE TABLE IF NOT EXISTS` conserve la table existante telle quelle ; une instruction suivante pouvait donc référencer une colonne absente (`app_id`, `candidate_app_id` ou `created_at`) et interrompre le démarrage.
 
-1. **Qualité documentaire** — un jeu n’est recommandé que si son profil contient au moins une base substantive (description, résumé ou motivation étayée). La popularité n’entre pas dans ce contrôle.
-2. **Deux indicateurs distincts** — la proximité sémantique mesure un voisinage vectoriel ; la fiabilité indique si ce rapprochement est suffisamment documenté.
-3. **Renouvellement** — Backlog mémorise les jeux récemment présentés et les dépriorise temporairement. Les refus explicites conservent une pénalité plus forte.
-4. **Terminé** — le statut est manuel, indépendant de l’appréciation et réversible. Le jeu reste consultable et utilisable comme référence, mais sort des prochaines propositions.
-5. **Surprends-moi** — en l’absence d’envie formulée, Backlog sélectionne des profils étayés, récents et diversifiés.
+V1.2.1 :
 
-Backlog peut désormais ne renvoyer aucun résultat plutôt que d’afficher un pourcentage construit sur un profil vide.
+1. crée une sauvegarde SQLite cohérente avec `VACUUM INTO` avant toute modification ;
+2. ouvre une transaction exclusive de migration ;
+3. inspecte chaque table avec `PRAGMA table_info` ;
+4. ajoute et peuple les colonnes canoniques avant de créer les index ;
+5. ne supprime, ne renomme et ne reconstruit aucune table métier ;
+6. annule toute la transaction au premier échec ;
+7. initialise le statut utilisateur des jeux seulement après validation du schéma ;
+8. rend la migration idempotente avec `PRAGMA user_version=1201`.
 
-## Prérequis
+La fixture de régression reproduit la structure observée de `games` et **4 321 jeux + 4 321 profils**. Le test compare une empreinte de toutes les lignes métier avant/après migration.
 
-- Docker et Docker Compose, ou Node.js 24+ ;
-- un dossier persistant accessible à l’UID 1000 pour SQLite ;
-- Ollama accessible depuis le conteneur pour les nouveaux enrichissements et les recherches textuelles ;
-- les modèles configurés (par défaut `qwen3:32b` et `embeddinggemma`).
+## Fonctions incluses
+
+- bibliothèque persistante et recherche par titre, studio ou AppID ;
+- import Steam non destructif ;
+- profils expérientiels, modèles, sources et embeddings consultables ;
+- enrichissement Ollama par lots ;
+- Découverte par similarité sémantique ;
+- contrôle de fiabilité documentaire et exclusion des profils spéculatifs ;
+- score séparant résonance et fiabilité ;
+- retours **Pertinent** / **Écarter** ;
+- historique et dépriorisation des jeux récemment présentés ;
+- diversification des genres ;
+- mode **Surprends-moi** ;
+- bouton **Terminé**, réversible ;
+- exclusion des jeux terminés des recommandations sans suppression du profil ;
+- authentification des opérations d'administration par jeton.
 
 ## Déploiement Dockge
 
-1. Sauvegarder le volume SQLite actuel.
-2. Copier `.env.example` vers `.env` et définir un `ADMIN_TOKEN` long et aléatoire.
-3. Vérifier que le réseau Docker externe `npm_default` existe et que Nginx Proxy Manager pointe vers `backlog-test:3000`.
-4. Conserver le même dossier `./data` que la V1.1.4.
-5. Dans Dockge : **Pull**, puis **Up**.
-6. Ouvrir `/healthz` et vérifier la version `1.2.0`.
+### 1. Sauvegarder le volume
+
+Même si V1.2.1 crée sa propre sauvegarde avant migration, faites une copie externe du dossier `data`.
+
+```bash
+cp -a /srv/docker/backlog/data \
+  /srv/docker/backlog/data.backup-$(date +%Y%m%d-%H%M%S)
+```
+
+### 2. Vérifier le chemin de la vraie base
+
+Le Compose fourni utilise explicitement :
+
+```yaml
+DATA_DIR: /data
+DB_PATH: /data/backlog-core.sqlite
+volumes:
+  - ./data:/data
+```
+
+Ne remplacez pas ce chemin par `/data/backlog.sqlite` : ce dernier correspond à l'ancienne base historique.
+
+### 3. Publier l'archive dans GitHub
+
+Remplacez le contenu du dépôt (sauf `.git` et vos secrets), puis poussez sur `main`. Le workflow fourni publie :
+
+- `ghcr.io/siivolabs/backlog:dev` ;
+- `ghcr.io/siivolabs/backlog:latest` ;
+- `ghcr.io/siivolabs/backlog:1.2.1`.
+
+### 4. Configurer `.env`
 
 ```bash
 cp .env.example .env
-mkdir -p data
-sudo chown -R 1000:1000 data
-docker compose up -d
-curl http://127.0.0.1:3000/healthz
 ```
 
-Si le service n’est volontairement pas publié sur l’hôte, exécuter le contrôle dans le conteneur ou via le Proxy Host.
+Définissez au minimum `ADMIN_TOKEN`. Vérifiez `OLLAMA_URL`.
 
-## Migration depuis V1.1.4
+### 5. Pull et redéploiement
 
-La migration s’exécute au démarrage et est uniquement additive :
+Dans Dockge : **Pull**, puis **Update/Up**. Au premier démarrage, le journal affiche le chemin de la sauvegarde `backlog-core.sqlite.pre-v1.2.1-….sqlite`.
 
-- création de `game_user_state` pour le statut Terminé ;
-- création de `recommendation_history` pour le renouvellement ;
-- ajout uniquement des colonnes manquantes aux tables `games` et `profiles` ;
-- récupération des tâches d’enrichissement restées `running` depuis plus de 30 minutes.
-
-Aucun profil ni embedding existant n’est supprimé. **Faire malgré tout une sauvegarde du fichier SQLite avant le premier démarrage.**
-
-## Utilisation
-
-### Bibliothèque
-- Rechercher par titre, studio ou AppID.
-- Cliquer une carte enrichie pour ouvrir la fiche complète.
-- Marquer un jeu Terminé ou annuler ce statut.
-- Importer un export Steam JSON sans supprimer les profils existants.
-
-### Découverte
-- Choisir explicitement un jeu de référence dans la recherche indépendante ; ou
-- décrire l’expérience recherchée ; ou
-- cliquer **Surprends-moi**.
-
-Chaque carte distingue la **proximité sémantique** de la **fiabilité**. Les profils insuffisants sont comptés parmi les résultats écartés, sans être affichés.
-
-### Administration
-Les opérations d’écriture exigent `ADMIN_TOKEN` : import, retours, statut Terminé et pilotage de l’enrichissement. Le navigateur le conserve dans `localStorage` et l’envoie dans l’en-tête `X-Admin-Token`.
-
-## Variables d’environnement
-
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `ADMIN_TOKEN` | vide | Obligatoire pour toute écriture |
-| `DATA_DIR` | `./data` | Dossier de données |
-| `DATABASE_PATH` | `$DATA_DIR/backlog.sqlite` | Fichier SQLite |
-| `OLLAMA_URL` | `http://host.docker.internal:11434` | API Ollama |
-| `OLLAMA_ANALYSIS_MODEL` | `qwen3:32b` | Modèle d’analyse |
-| `OLLAMA_EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
-| `AUTO_ENRICH` | `true` | Active le worker autonome |
-| `ENRICHMENT_CONCURRENCY` | `1` | Tâches parallèles (1 à 4) |
-| `MIN_PROFILE_QUALITY` | `0.35` | Seuil documentaire minimal |
-| `REQUEST_TIMEOUT_MS` | `120000` | Délai Ollama |
-
-## API principale
-
-- `GET /healthz`
-- `GET /api/status`
-- `GET /api/library`
-- `GET /api/library/search?q=...`
-- `GET /api/library/:appId/profile`
-- `PATCH /api/library/:appId/completed`
-- `POST /api/library/import`
-- `POST /api/discovery`
-- `POST /api/discovery/feedback`
-- `GET /api/discovery/history`
-- `GET /api/enrichment/status`
-- `POST /api/enrichment/start|pause|retry`
-
-## Tests
-
-Le projet n’utilise aucune dépendance npm d’exécution ; SQLite est fourni par Node.js 24.
+### 6. Vérifier
 
 ```bash
-npm ci
+curl http://127.0.0.1:3087/healthz
+```
+
+Résultat attendu :
+
+```json
+{"status":"ok","version":"1.2.1","schemaVersion":1201,"games":4321,"profiles":4321}
+```
+
+## Validation locale
+
+Node.js 22.5+ est requis pour `node:sqlite`.
+
+```bash
 npm test
 npm run check
 ```
 
-Les tests couvrent la migration, la recherche indépendante, les fiches, l’import non destructif, le filtre documentaire, le renouvellement, le statut Terminé, Surprends-moi, l’API HTTP, l’authentification et les en-têtes de sécurité.
+Tester une copie d'une base sans toucher à l'original :
+
+```bash
+node scripts/verify-database.mjs /chemin/vers/backlog-core.sqlite
+```
+
+## Restauration
+
+1. arrêter le conteneur ;
+2. conserver la base ayant échoué pour diagnostic ;
+3. recopier la sauvegarde `.pre-v1.2.1-….sqlite` vers `backlog-core.sqlite` ;
+4. supprimer seulement les fichiers `backlog-core.sqlite-wal` et `backlog-core.sqlite-shm` associés à la tentative, conteneur arrêté ;
+5. redémarrer l'ancienne image.
+
+## Données et secrets
+
+L'archive ne contient ni base SQLite, ni `.env`, ni jeton, ni `node_modules`.
