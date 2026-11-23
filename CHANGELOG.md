@@ -1,25 +1,23 @@
 # Journal des versions
 
-## 1.1.4 — 22 novembre 2026
+## 1.2.0 — Fiabilisation de la découverte
 
-- Recherche Résonances indépendante par titre, studio ou Steam AppID.
-- Résolution d’un résultat vers son véritable AppID avant l’appel à Découverte.
-- Annulation des requêtes de suggestions précédentes et rejet des réponses obsolètes.
-- Ouverture au clic ou au clavier des fiches des jeux enrichis depuis la Bibliothèque.
-- Affichage générique des champs de profil et des structures JSON imbriquées.
-- Route de profil en lecture seule, sans migration ni modification du pipeline d’enrichissement.
-- Publication GHCR simultanée sous `dev`, `latest` et `sha-*` pour rester compatible avec la stack Dockge existante.
-- Ajout de tests de régression V1.1.4.
+### Ajouts
+- Contrôle de la qualité documentaire avant recommandation ; un embedding seul ne suffit plus.
+- Affichage séparé de la proximité sémantique et de la fiabilité du profil.
+- Capacité explicite à s’abstenir lorsque les connaissances sont insuffisantes.
+- Historique des propositions et pénalité de récence pour renouveler les résultats.
+- Diversification légère des résultats sans introduire de tirage aléatoire.
+- Bouton **Terminé**, réversible, dans la bibliothèque et les recommandations.
+- Exclusion des jeux terminés de Découverte tout en conservant leurs profils.
+- Mode **Surprends-moi** lorsqu’aucune envie n’est formulée.
 
-## 1.1.3
+### Conservé
+- Base SQLite et migration additive sans suppression de données.
+- Import d’inventaire, enrichissement autonome via Ollama, profils et embeddings existants.
+- Recherche indépendante par titre, studio ou Steam AppID.
+- Fiches enrichies complètes et lecture des structures JSON imbriquées.
+- Retours Pertinent/Écarter et jeton administrateur.
 
-- Retour à l'identité visuelle bleue et aux comportements Backlog Core V1.0.
-- Utilisation directe et non destructive du schéma SQLite V1.0.
-- Restauration des couvertures avec repli vers la jaquette Steam.
-- Restauration de la saisie et de la vérification du jeton administrateur.
-- Fusion Bibliothèque/Enrichissement.
-- Campagne globale côté serveur, persistante, suspendable et reprise après redémarrage.
-- Suivi détaillé et relance des erreurs.
-- Conservation des profils, sessions et corrections de Découverte.
-- Nettoyage des anciens tests CommonJS; suite unique `tests/` sous Node 24.
-- Workflow GitHub Actions/GHCR et Compose Dockge inclus.
+### Terminologie
+Le pourcentage est désormais présenté comme une **proximité sémantique** et non comme une probabilité d’appréciation.

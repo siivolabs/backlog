@@ -1,31 +1,31 @@
 services:
   backlog:
     image: ghcr.io/siivolabs/backlog:dev
-    container_name: backlog
+    container_name: backlog-test
     restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     environment:
+      NODE_ENV: production
       PORT: 3000
-      DATABASE_PATH: /data/backlog-core.sqlite
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN doit être défini}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      AI_ANALYSIS_MODEL: ${AI_ANALYSIS_MODEL:-qwen3:32b}
-      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-embeddinggemma}
-      STEAM_ENRICHMENT_ENABLED: ${STEAM_ENRICHMENT_ENABLED:-true}
-      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-120000}
+      DATA_DIR: /app/data
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Définissez ADMIN_TOKEN dans .env}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_ANALYSIS_MODEL: ${OLLAMA_ANALYSIS_MODEL:-qwen3:32b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-embeddinggemma}
+      AUTO_ENRICH: ${AUTO_ENRICH:-true}
+      ENRICHMENT_CONCURRENCY: ${ENRICHMENT_CONCURRENCY:-1}
+      MIN_PROFILE_QUALITY: ${MIN_PROFILE_QUALITY:-0.35}
     volumes:
-      - ${DATA_PATH:-./data}:/data
+      - ./data:/app/data
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
     extra_hosts:
-      - host.docker.internal:host-gateway
+      - "host.docker.internal:host-gateway"
     networks:
       - npm_default
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-
 networks:
   npm_default:
     external: true

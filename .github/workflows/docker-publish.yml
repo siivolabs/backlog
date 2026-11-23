@@ -1,18 +1,12 @@
-name: Build and publish Backlog Core
-
+name: Build and publish Docker image
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
-
 permissions:
   contents: read
   packages: write
-
-concurrency:
-  group: backlog-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   test-and-publish:
     runs-on: ubuntu-latest
@@ -22,7 +16,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci --ignore-scripts
+      - run: npm ci
       - run: npm test
       - run: npm run check
       - uses: docker/setup-buildx-action@v3
@@ -34,18 +28,16 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/backlog
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=dev
-            type=raw,value=latest
-            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+            type=ref,event=tag
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: mode=max
-          sbom: true
+          platforms: linux/amd64,linux/arm64

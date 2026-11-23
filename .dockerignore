@@ -1,11 +1,9 @@
 .git
 .github
 node_modules
-npm-debug.log*
-*.sqlite
-*.sqlite-*
-data
-backups
+npm-debug.log
 coverage
+data
+*.sqlite*
 *.zip
-*.sha256
+.env

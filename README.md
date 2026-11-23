@@ -1,58 +1,112 @@
-# Backlog Core V1.1.4
+# Backlog Core V1.2.0
 
-Version complète fondée sur **Backlog Core V1.1.3**. Elle conserve l’interface bleue, les couvertures, le jeton administrateur, le modèle SQLite, les profils et embeddings existants, la Découverte et le pipeline autonome d’enrichissement.
+Backlog est une bibliothèque de jeux auto-hébergée qui enrichit localement les métadonnées avec Ollama et aide à faire émerger des expériences déjà possédées.
 
-## Corrections V1.1.4
+## Ce que change V1.2
 
-1. **Jeu de référence dans Résonances**
-   - recherche indépendante par titre, studio ou Steam AppID ;
-   - résolution explicite vers le véritable AppID avant l’appel à Découverte ;
-   - annulation des recherches précédentes et rejet des réponses asynchrones obsolètes.
-2. **Fiches enrichies depuis la Bibliothèque**
-   - les cartes enrichies sont consultables au clic ou au clavier ;
-   - tous les champs du profil sont affichés, y compris les objets et tableaux JSON ;
-   - la consultation est strictement en lecture seule.
+La version 1.2 conserve la bibliothèque, les profils et les embeddings de V1.1.4, puis fiabilise leur exploitation :
 
-## Garanties de compatibilité
+1. **Qualité documentaire** — un jeu n’est recommandé que si son profil contient au moins une base substantive (description, résumé ou motivation étayée). La popularité n’entre pas dans ce contrôle.
+2. **Deux indicateurs distincts** — la proximité sémantique mesure un voisinage vectoriel ; la fiabilité indique si ce rapprochement est suffisamment documenté.
+3. **Renouvellement** — Backlog mémorise les jeux récemment présentés et les dépriorise temporairement. Les refus explicites conservent une pénalité plus forte.
+4. **Terminé** — le statut est manuel, indépendant de l’appréciation et réversible. Le jeu reste consultable et utilisable comme référence, mais sort des prochaines propositions.
+5. **Surprends-moi** — en l’absence d’envie formulée, Backlog sélectionne des profils étayés, récents et diversifiés.
 
-- Aucune migration n’est ajoutée par V1.1.4.
-- `games.app_id` reste `TEXT`; les tables `games`, `profiles`, `discovery_feedback` et `discovery_sessions` ne changent pas.
-- `core_background_campaign` et `core_background_queue` restent celles de V1.1.3.
-- Le pipeline d’enrichissement, les profils, embeddings, sessions et corrections existants restent inchangés.
-- Toutes les mutations administratives exigent `ADMIN_TOKEN`.
-- L’archive ne contient ni ancien dossier `test/`, ni données SQLite, ni sauvegarde du kit correctif, ni `node_modules`.
+Backlog peut désormais ne renvoyer aucun résultat plutôt que d’afficher un pourcentage construit sur un profil vide.
 
-## Démarrage local
+## Prérequis
 
-Prérequis : Node.js 24.
+- Docker et Docker Compose, ou Node.js 24+ ;
+- un dossier persistant accessible à l’UID 1000 pour SQLite ;
+- Ollama accessible depuis le conteneur pour les nouveaux enrichissements et les recherches textuelles ;
+- les modèles configurés (par défaut `qwen3:32b` et `embeddinggemma`).
+
+## Déploiement Dockge
+
+1. Sauvegarder le volume SQLite actuel.
+2. Copier `.env.example` vers `.env` et définir un `ADMIN_TOKEN` long et aléatoire.
+3. Vérifier que le réseau Docker externe `npm_default` existe et que Nginx Proxy Manager pointe vers `backlog-test:3000`.
+4. Conserver le même dossier `./data` que la V1.1.4.
+5. Dans Dockge : **Pull**, puis **Up**.
+6. Ouvrir `/healthz` et vérifier la version `1.2.0`.
 
 ```bash
 cp .env.example .env
-set -a; . ./.env; set +a
-npm ci --ignore-scripts
-npm test
-npm run check
-npm start
+mkdir -p data
+sudo chown -R 1000:1000 data
+docker compose up -d
+curl http://127.0.0.1:3000/healthz
 ```
 
-Ouvrir `http://localhost:3000`. Le navigateur garde le jeton uniquement dans `sessionStorage`.
+Si le service n’est volontairement pas publié sur l’hôte, exécuter le contrôle dans le conteneur ou via le Proxy Host.
+
+## Migration depuis V1.1.4
+
+La migration s’exécute au démarrage et est uniquement additive :
+
+- création de `game_user_state` pour le statut Terminé ;
+- création de `recommendation_history` pour le renouvellement ;
+- ajout uniquement des colonnes manquantes aux tables `games` et `profiles` ;
+- récupération des tâches d’enrichissement restées `running` depuis plus de 30 minutes.
+
+Aucun profil ni embedding existant n’est supprimé. **Faire malgré tout une sauvegarde du fichier SQLite avant le premier démarrage.**
+
+## Utilisation
+
+### Bibliothèque
+- Rechercher par titre, studio ou AppID.
+- Cliquer une carte enrichie pour ouvrir la fiche complète.
+- Marquer un jeu Terminé ou annuler ce statut.
+- Importer un export Steam JSON sans supprimer les profils existants.
+
+### Découverte
+- Choisir explicitement un jeu de référence dans la recherche indépendante ; ou
+- décrire l’expérience recherchée ; ou
+- cliquer **Surprends-moi**.
+
+Chaque carte distingue la **proximité sémantique** de la **fiabilité**. Les profils insuffisants sont comptés parmi les résultats écartés, sans être affichés.
+
+### Administration
+Les opérations d’écriture exigent `ADMIN_TOKEN` : import, retours, statut Terminé et pilotage de l’enrichissement. Le navigateur le conserve dans `localStorage` et l’envoie dans l’en-tête `X-Admin-Token`.
+
+## Variables d’environnement
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `ADMIN_TOKEN` | vide | Obligatoire pour toute écriture |
+| `DATA_DIR` | `./data` | Dossier de données |
+| `DATABASE_PATH` | `$DATA_DIR/backlog.sqlite` | Fichier SQLite |
+| `OLLAMA_URL` | `http://host.docker.internal:11434` | API Ollama |
+| `OLLAMA_ANALYSIS_MODEL` | `qwen3:32b` | Modèle d’analyse |
+| `OLLAMA_EMBEDDING_MODEL` | `embeddinggemma` | Modèle d’embedding |
+| `AUTO_ENRICH` | `true` | Active le worker autonome |
+| `ENRICHMENT_CONCURRENCY` | `1` | Tâches parallèles (1 à 4) |
+| `MIN_PROFILE_QUALITY` | `0.35` | Seuil documentaire minimal |
+| `REQUEST_TIMEOUT_MS` | `120000` | Délai Ollama |
 
 ## API principale
 
 - `GET /healthz`
-- `GET /api/library` — paramètres `search`, `status`, `page`, `pageSize`
-- `GET /api/library/profile?appId=...` — profil enrichi en lecture seule
-- `POST /api/library/import` — administrateur
-- `GET /api/enrichment/status`
-- `GET /api/enrichment/errors`
-- `POST /api/enrichment/start|pause|resume|retry-failed` — administrateur
+- `GET /api/status`
+- `GET /api/library`
+- `GET /api/library/search?q=...`
+- `GET /api/library/:appId/profile`
+- `PATCH /api/library/:appId/completed`
+- `POST /api/library/import`
 - `POST /api/discovery`
-- `POST /api/discovery/feedback` — administrateur
+- `POST /api/discovery/feedback`
+- `GET /api/discovery/history`
+- `GET /api/enrichment/status`
+- `POST /api/enrichment/start|pause|retry`
 
-Le jeton se transmet par `X-Admin-Token` ou `Authorization: Bearer ...`.
+## Tests
 
-## Publication et déploiement
+Le projet n’utilise aucune dépendance npm d’exécution ; SQLite est fourni par Node.js 24.
 
-Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Le workflow publie les tags GHCR `dev`, `latest` et `sha-*`; le Compose Dockge fourni reste aligné sur le tag `dev` déjà utilisé par la stack.
+```bash
+npm ci
+npm test
+npm run check
+```
 
-**Cette archive ne déploie rien sur le NAS.**
+Les tests couvrent la migration, la recherche indépendante, les fiches, l’import non destructif, le filtre documentaire, le renouvellement, le statut Terminé, Surprends-moi, l’API HTTP, l’authentification et les en-têtes de sécurité.

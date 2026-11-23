@@ -1,19 +1,18 @@
 import crypto from 'node:crypto';
 
-function safeEqual(left, right) {
-  const a = Buffer.from(String(left));
-  const b = Buffer.from(String(right));
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+function equal(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-export function suppliedToken(request) {
-  const bearer = request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  return request.headers['x-admin-token'] || bearer || '';
+export function adminTokenFrom(request) {
+  const authorization = request.headers.authorization || '';
+  if (/^Bearer\s+/i.test(authorization)) return authorization.replace(/^Bearer\s+/i, '').trim();
+  return String(request.headers['x-admin-token'] || '').trim();
 }
 
-export function authorize(request, configuredToken) {
-  if (!configuredToken) return { ok: false, status: 503, error: 'ADMIN_TOKEN non configuré : les opérations d’administration restent verrouillées.' };
-  if (!safeEqual(suppliedToken(request), configuredToken)) return { ok: false, status: 401, error: 'Jeton administrateur invalide ou absent.' };
-  return { ok: true };
+export function requireAdmin(request, config) {
+  if (!config.adminToken) throw Object.assign(new Error('ADMIN_TOKEN doit être configuré pour les opérations d’écriture.'), { status: 503 });
+  if (!equal(adminTokenFrom(request), config.adminToken)) throw Object.assign(new Error('Jeton administrateur invalide.'), { status: 401 });
 }
