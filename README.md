@@ -1,59 +1,88 @@
-# Backlog Core V1.2.1 — correctif de reconnexion à la base historique 1.1.4
+# Backlog Core V1.2.2
 
-Ce livrable corrige uniquement la connexion de V1.2.1 à la base SQLite historique déjà enrichie. Il ne change pas l'architecture de Backlog, ne crée aucune base, ne reconstruit aucune table, n'exécute aucune migration et ne lance aucun ré-enrichissement.
+Intégration complète des fonctions attendues pour la V1.2 sur **la base SQLite historique V1.1.4**. L'application n'utilise et ne crée aucune base de remplacement.
 
-## Diagnostic établi dans les sources
+## Garanties de continuité
 
-- V1.1.4 utilisait `DATABASE_PATH=/data/backlog-core.sqlite` et `${DATA_PATH:-./data}:/data`.
-- V1.2.0 avait introduit `DATA_DIR=/app/data` et un défaut `backlog.sqlite`, donc un autre fichier et un autre point de montage.
-- V1.2.1 a introduit le nouveau nom `DB_PATH` et exécutait une migration automatique au démarrage.
-- L'interface V1.2.1 ne reconstruisait pas les jaquettes quand `cover_url` était vide et n'utilisait pas `profile_json.summary` comme description de repli.
+- chemin historique prioritaire : `DATABASE_PATH=/data/backlog-core.sqlite` ;
+- volume historique inchangé : `${DATA_PATH:-./data}:/data` ;
+- démarrage refusé si le fichier SQLite n'existe pas, est vide, incohérent ou ne contient pas `games` et `profiles` ;
+- refus si `DATABASE_PATH` et l'alias `DB_PATH` ciblent des fichiers différents ;
+- aucune suppression, reconstruction ou modification des lignes de `games` et `profiles` ;
+- aucune base SQLite incluse dans l'archive ;
+- ré-enrichissement désactivé par défaut.
 
-Le correctif revient au contrat de connexion de V1.1.4 :
+Au premier démarrage, et seulement si l'état V1.2 n'existe pas encore, Backlog crée une sauvegarde de sécurité `backlog-core.sqlite.pre-v1.2.2-….bak`, puis ajoute **dans le même fichier historique** deux tables isolées :
 
-```yaml
-environment:
-  DATABASE_PATH: /data/backlog-core.sqlite
-volumes:
-  - ${DATA_PATH:-./data}:/data
-```
+- `game_user_state` : état manuel et réversible « Terminé » ;
+- `recommendation_history` : renouvellement des propositions.
 
-`DATABASE_PATH` est prioritaire. `DB_PATH` reste accepté comme alias uniquement s'il cible exactement le même fichier. Si les deux diffèrent, le démarrage est refusé.
+Cette migration est additive, transactionnelle et idempotente. Les lignes des 4 321 jeux et profils ne sont pas recopiées dans une nouvelle base.
 
-## Garde-fous
+## Fonctions V1.2 intégrées
 
-- le fichier SQLite doit déjà exister et être non vide ; sinon le démarrage échoue au lieu de créer une base ;
-- les tables `games` et `profiles` et leurs colonnes essentielles sont contrôlées ;
-- `PRAGMA quick_check` doit renvoyer `ok` ;
-- aucune fonction de migration n'est appelée ;
-- aucune table de V1.2 n'est créée si elle manque dans le schéma 1.1.4 ;
-- le ré-enrichissement est désactivé par défaut avec `ENRICHMENT_ENABLED=false` ;
-- les fonctions V1.2 dont les tables n'existent pas (par exemple `game_user_state`) sont signalées comme indisponibles au lieu de modifier le schéma.
+1. **Qualité documentaire** : les profils insuffisants ou spéculatifs sont exclus.
+2. **Deux indicateurs** : proximité sémantique et fiabilité documentaire restent séparées.
+3. **Renouvellement** : les résultats récemment présentés sont temporairement dépriorisés.
+4. **Terminé** : le statut persiste, est réversible et retire immédiatement le jeu de Découverte.
+5. **Surprends-moi** : sélection diversifiée sans embedding de requête.
+6. **Affichage historique restauré** : jaquette enregistrée ou repli Steam, description du jeu ou résumé de profil, fiche complète, sources, modèles et embedding.
 
-## Diagnostic en lecture seule
+Un jeu terminé peut toujours être consulté et servir de jeu de référence. Il est uniquement exclu comme candidat dans les recommandations.
 
-À exécuter uniquement sur un chemin explicitement choisi :
+## Déploiement Dockge / Docker Compose
 
-```bash
-node scripts/diagnose-database.mjs /chemin/vers/backlog-core.sqlite
-```
-
-Le script ouvre la base avec `readOnly: true`, affiche le chemin absolu, la taille, le SHA-256, `quick_check`, les nombres de jeux/profils/embeddings et vérifie que le SHA-256 du fichier n'a pas changé.
-
-## Données restaurées à l'affichage
-
-- jaquette enregistrée, ou repli Steam `header.jpg` calculé à partir de l'AppID ;
-- description enregistrée, sinon `profile_json.summary`, sinon description de source ;
-- fiche complète avec profil, sources, modèles et embedding ;
-- Découverte sur les embeddings historiques, sans ré-enrichissement.
-
-## Validation locale, sans NAS
+1. Arrêter l'ancienne version.
+2. Conserver le dossier de données V1.1.4 à son emplacement actuel.
+3. Copier `.env.example` vers `.env` et renseigner un `ADMIN_TOKEN` long.
+4. Vérifier que `DATA_PATH` pointe vers le dossier qui contient déjà `backlog-core.sqlite`.
+5. Lancer `docker compose up -d`.
+6. Vérifier `/healthz` avant d'utiliser l'interface.
 
 ```bash
+cp .env.example .env
+# Adapter uniquement DATA_PATH et ADMIN_TOKEN si nécessaire.
+docker compose up -d
+curl http://127.0.0.1:3000/healthz
+```
+
+Résultat attendu : version `1.2.2`, `database: historical-existing`, capacités `completion` et `recommendationHistory` actives, et les compteurs historiques attendus.
+
+> Ne créez pas un nouveau dossier `data` vide. Si `backlog-core.sqlite` est absent, Backlog refuse de démarrer au lieu de créer une base.
+
+## Test du bouton « Terminé »
+
+1. Saisir le jeton administrateur dans l'interface.
+2. Ouvrir Découverte et noter un jeu proposé.
+3. Cliquer **Terminé** sur sa carte : la carte disparaît immédiatement.
+4. Relancer la même découverte : le jeu ne doit plus apparaître.
+5. Dans Bibliothèque, filtrer sur **Terminés** et vérifier sa présence.
+6. Cliquer **Rouvrir** : le jeu redevient éligible aux recommandations.
+7. Redémarrer le conteneur et confirmer que le statut a persisté.
+
+## Développement et validation
+
+Node.js 24 est recommandé (`node:sqlite`).
+
+```bash
+npm ci
 npm run check
 npm test
 ```
 
-Les tests utilisent une base synthétique au schéma exact de V1.1.4 contenant 4 321 jeux et 4 321 profils. Ils vérifient notamment l'absence de création/migration, l'identité du fichier SQLite après les lectures HTTP, les jaquettes, descriptions, fiches et la réutilisation des embeddings.
+Le diagnostic en lecture seule n'initialise pas l'état V1.2 :
 
-Ce livrable n'a pas été déployé sur le NAS.
+```bash
+npm run diagnose-db -- /chemin/vers/backlog-core.sqlite
+```
+
+## Sécurité des écritures
+
+Le bouton Terminé, les retours Pertinent/Écarter, l'import et le pilotage de l'enrichissement exigent `ADMIN_TOKEN`. Le navigateur conserve ce jeton dans `sessionStorage`, pas dans l'archive.
+
+## Retour arrière
+
+1. arrêter le conteneur ;
+2. conserver la base courante pour diagnostic ;
+3. si nécessaire, remettre la sauvegarde `.pre-v1.2.2-….bak` sous le nom `backlog-core.sqlite` ;
+4. redémarrer l'ancienne image avec le même volume.

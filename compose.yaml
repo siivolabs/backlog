@@ -1,6 +1,6 @@
 services:
   backlog:
-    image: ghcr.io/siivolabs/backlog:dev
+    image: ghcr.io/siivolabs/backlog:1.2.2
     container_name: backlog
     restart: unless-stopped
     user: "1000:1000"

@@ -17,7 +17,7 @@ export function loadConfig(env = process.env) {
   }
   const databasePath = historical || alias || '/data/backlog-core.sqlite';
   return {
-    version: '1.2.1-historical-db-hotfix',
+    version: '1.2.2',
     port: integer(env.PORT, 3000, 1, 65535),
     host: env.HOST || '0.0.0.0',
     databasePath: path.resolve(databasePath),

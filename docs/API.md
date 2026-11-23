@@ -1,9 +1,13 @@
-# API du correctif historique
+# API Backlog Core V1.2.2
 
-- `GET /healthz` : compteurs, version et capacités détectées ;
-- `GET /api/library` : bibliothèque issue de `games` et `profiles` ;
-- `GET /api/games/:appId` : fiche, profil, sources, modèles et embedding ;
-- `POST /api/discovery` : découverte à partir des embeddings existants ;
-- `POST /api/discovery/feedback` : retour utilisateur si la table historique compatible existe ;
-- `PATCH /api/games/:appId/completed` : disponible seulement si `game_user_state` existe déjà ; aucune table n'est créée ;
-- `POST /api/enrichment/run` : refusé tant que `ENRICHMENT_ENABLED=false`.
+- `GET /healthz` — version, compteurs, origine de la base et capacités.
+- `GET /api/library?q=&completed=&limit=&offset=` — bibliothèque historique.
+- `GET /api/games/:appId` — jeu, profil, sources, modèles et embedding.
+- `PATCH /api/games/:appId/completed` — corps `{ "completed": true|false }`, jeton requis.
+- `POST /api/discovery` — découverte par référence, embedding, texte ou mode surprise.
+- `POST /api/discovery/feedback` — retour positif/négatif, jeton requis.
+- `POST /api/import/steam` — import compatible avec le schéma historique, jeton requis.
+- `GET /api/enrichment/status` — état disponible sans écriture.
+- `POST /api/enrichment/run` — jeton requis et refusé tant que `ENRICHMENT_ENABLED=false`.
+
+Le jeton est transmis par `X-Admin-Token` ou `Authorization: Bearer …`.

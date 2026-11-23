@@ -25,7 +25,16 @@ function card(game, discovery = false) {
   return `<article class="card" data-appid="${escapeHtml(game.app_id)}"><div class="cover-wrap"><img class="cover" loading="lazy" src="${escapeHtml(game.cover_url || '')}" alt="Jaquette de ${escapeHtml(game.title)}"></div><div class="card-body"><h3 title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</h3><p>${escapeHtml(game.description || game.summary || game.studio || 'Description indisponible.')}</p>${score}<div class="actions">${discovery ? '<button data-feedback="positive">Pertinent</button><button data-feedback="negative">Écarter</button>' : ''}${complete}<button class="details-button" data-details>${game.profiled || discovery ? 'Voir la fiche' : 'Détails'}</button></div></div></article>`;
 }
 function bindCards(container) {
-  container.querySelectorAll('[data-completed]').forEach((button) => button.addEventListener('click', async () => { try { const article = button.closest('[data-appid]'); await api(`/api/games/${article.dataset.appid}/completed`, { method: 'PATCH', body: JSON.stringify({ completed: button.dataset.completed === '1' }) }); await loadLibrary(); } catch (error) { toast(error.message, true); } }));
+  container.querySelectorAll('[data-completed]').forEach((button) => button.addEventListener('click', async () => {
+    try {
+      const article = button.closest('[data-appid]');
+      const completed = button.dataset.completed === '1';
+      await api(`/api/games/${article.dataset.appid}/completed`, { method: 'PATCH', body: JSON.stringify({ completed }) });
+      if (completed && container.id === 'discoveryGrid') article.remove();
+      await loadLibrary();
+      toast(completed ? 'Jeu marqué comme terminé et retiré des prochaines recommandations.' : 'Jeu rouvert : il peut de nouveau être recommandé.');
+    } catch (error) { toast(error.message, true); }
+  }));
   container.querySelectorAll('[data-details]').forEach((button) => button.addEventListener('click', async () => {
     const id = button.closest('[data-appid]').dataset.appid; const dialog = $('#details'); $('#detailsContent').innerHTML = '<p>Chargement de la fiche…</p>'; dialog.showModal();
     try { const game = await api(`/api/games/${id}`); $('#detailsContent').innerHTML = `<div class="detail-hero"><img src="${escapeHtml(game.cover_url || '')}" alt=""><div><p class="eyebrow">FICHE ENRICHIE</p><h2>${escapeHtml(game.title)}</h2><p>${escapeHtml(game.description || '')}</p><div class="detail-meta">AppID ${escapeHtml(game.app_id)} · confiance ${game.confidence == null ? 'non renseignée' : `${Math.round(game.confidence * 100)} %`}</div></div></div><section class="profile-section"><h3>Profil expérientiel</h3>${renderValue(game.profile)}</section><section class="profile-section"><h3>Sources</h3>${renderValue(game.sources)}</section><section class="profile-section"><h3>Modèles et embedding</h3>${renderValue({ schema_version: game.schema_version, analysis_model: game.analysis_model, embedding_model: game.embedding_model, embedding: game.embedding })}</section>`; }

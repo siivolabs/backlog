@@ -42,7 +42,7 @@ export function createBacklogServer(config, options = {}) {
       const url = new URL(request.url, 'http://backlog.local');
       if (request.method === 'GET' && url.pathname === '/healthz') {
         const counts = db.prepare('SELECT (SELECT COUNT(*) FROM games) games,(SELECT COUNT(*) FROM profiles) profiles').get();
-        return send(response, 200, { status: 'ok', version: config.version, database: 'historical-existing', capabilities: db.capabilities, ...counts });
+        return send(response, 200, { status: 'ok', version: config.version, database: 'historical-existing', databasePathSource: config.databasePathSource, capabilities: db.capabilities, ...counts });
       }
       if (request.method === 'GET' && url.pathname === '/api/library') {
         const completedRaw = url.searchParams.get('completed');
@@ -56,7 +56,10 @@ export function createBacklogServer(config, options = {}) {
       }
       const completedMatch = url.pathname.match(/^\/api\/games\/([^/]+)\/completed$/);
       if (request.method === 'PATCH' && completedMatch) {
-        const input = await body(request); const state = setCompleted(db, completedMatch[1], Boolean(input.completed));
+        requireAdmin(request, config);
+        const input = await body(request);
+        if (typeof input.completed !== 'boolean') throw Object.assign(new Error('Le champ completed doit être un booléen.'), { status: 400 });
+        const state = setCompleted(db, completedMatch[1], input.completed);
         return state ? send(response, 200, state) : send(response, 404, { error: 'Jeu introuvable.' });
       }
       if (request.method === 'POST' && url.pathname === '/api/discovery') {
@@ -65,7 +68,7 @@ export function createBacklogServer(config, options = {}) {
         if (!embedding && input.query && !input.surprise) embedding = await embedText(config, input.query);
         return send(response, 200, discover(db, { ...input, embedding, minQuality: config.discoveryMinQuality, recentDays: config.recentDays }));
       }
-      if (request.method === 'POST' && url.pathname === '/api/discovery/feedback') return send(response, 201, recordFeedback(db, await body(request)));
+      if (request.method === 'POST' && url.pathname === '/api/discovery/feedback') { requireAdmin(request, config); return send(response, 201, recordFeedback(db, await body(request))); }
       if (request.method === 'POST' && url.pathname === '/api/import/steam') { requireAdmin(request, config); return send(response, 200, importSteam(db, await body(request))); }
       if (request.method === 'GET' && url.pathname === '/api/enrichment/status') {
         if (!db.capabilities.enrichmentQueue) return send(response, 200, { enabled: false, queue: [], message: 'Ré-enrichissement désactivé; base historique laissée intacte.' });
@@ -80,7 +83,7 @@ export function createBacklogServer(config, options = {}) {
       if (request.method === 'GET' && !url.pathname.startsWith('/api/') && staticFile(url.pathname, response)) return;
       send(response, 404, { error: 'Route introuvable.' });
     } catch (error) {
-      console.error(error);
+      if (!error.status || error.status >= 500) console.error(error);
       send(response, error.status || 500, { error: error.status ? error.message : 'Erreur interne.', detail: process.env.NODE_ENV === 'production' ? undefined : error.message });
     }
   });

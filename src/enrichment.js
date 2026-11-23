@@ -30,7 +30,7 @@ export async function enrichOne(db, config, appId) {
     const uncertainty = String(profile.uncertainty || '');
     const confidence = Math.max(0, Math.min(1, 0.35 + Math.min(0.35, evidence.length * 0.08) - (/insuffisant|unknown|inconnu|absence/i.test(uncertainty) ? 0.25 : 0)));
     db.prepare(`INSERT INTO profiles(app_id,profile_json,embedding_json,schema_version,analysis_model,embedding_model,confidence,source_json,updated_at)
-      VALUES (?,?,?,'core-v1.2.1',?,?,?,?,CURRENT_TIMESTAMP)
+      VALUES (?,?,?,'core-v1.2.2',?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(app_id) DO UPDATE SET profile_json=excluded.profile_json,embedding_json=excluded.embedding_json,
       schema_version=excluded.schema_version,analysis_model=excluded.analysis_model,embedding_model=excluded.embedding_model,
       confidence=excluded.confidence,source_json=excluded.source_json,updated_at=CURRENT_TIMESTAMP`).run(String(appId), asJson(profile, {}), asJson(embedding, []), config.analysisModel, config.embeddingModel, confidence, asJson(evidence, []));

@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-export function temporaryDirectory() { return fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-historical-hotfix-')); }
+export function temporaryDirectory() { return fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-v1.2.2-')); }
 export function fileHash(filename) { return crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex'); }
 export function businessHash(db) {
   const hash = crypto.createHash('sha256');
